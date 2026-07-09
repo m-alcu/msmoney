@@ -96,17 +96,35 @@ static void sortTxs(Account& acc) {
                      [](const Transaction& x, const Transaction& y) { return x.date < y.date; });
 }
 
-static int firstBankIdx(const Portfolio& pf) {
+// deposits hold a principal + interest terms, they have no movement register;
+// money accounts (cash/bank) are the only valid source/target for operations
+static std::vector<int> moneyAccIdx(const Portfolio& pf) {
+    std::vector<int> v;
     for (int i = 0; i < (int)pf.accounts.size(); i++)
-        if (pf.accounts[i].type == AccountType::Bank) return i;
+        if (pf.accounts[i].type != AccountType::Deposit) v.push_back(i);
+    return v;
+}
+
+static std::vector<std::string> moneyAccNames(const Portfolio& pf) {
+    std::vector<std::string> v;
+    for (int i : moneyAccIdx(pf)) v.push_back(pf.accounts[i].name);
+    return v;
+}
+
+static int firstBankIdx(const Portfolio& pf) {
+    auto idx = moneyAccIdx(pf);
+    for (int j = 0; j < (int)idx.size(); j++)
+        if (pf.accounts[idx[j]].type == AccountType::Bank) return j;
     return 0;
 }
 
 // ---- small widget helpers --------------------------------------------------
 static void TextRight(const std::string& s, const ImVec4& col = C_TEXT, ImFont* font = nullptr) {
     if (font) ImGui::PushFont(font);
-    float w = ImGui::CalcTextSize(s.c_str()).x;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - w);
+    float off = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(s.c_str()).x;
+    // never move left of the cell start: overflowing text would get clipped
+    // on its left side, silently dropping leading digits
+    if (off > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + off);
     ImGui::TextColored(col, "%s", s.c_str());
     if (font) ImGui::PopFont();
 }
@@ -136,12 +154,6 @@ static bool ComboStrings(const char* label, int* idx, const std::vector<std::str
         ImGui::EndCombo();
     }
     return changed;
-}
-
-static std::vector<std::string> accountNames(const Portfolio& pf) {
-    std::vector<std::string> v;
-    for (auto& a : pf.accounts) v.push_back(a.name);
-    return v;
 }
 
 static std::vector<std::string> assetNames(const Portfolio& pf) {
@@ -194,9 +206,11 @@ static void openForm(App& a, FormKind k) {
     a.pending = k;
 }
 
-static void addCashMovement(App& a, int accIdx, const std::string& desc, double amount) {
-    if (accIdx < 0 || accIdx >= (int)a.pf.accounts.size()) return;
-    Account& acc = a.pf.accounts[accIdx];
+// filteredIdx indexes into moneyAccIdx(pf), i.e. the combo shown in dialogs
+static void addCashMovement(App& a, int filteredIdx, const std::string& desc, double amount) {
+    auto idx = moneyAccIdx(a.pf);
+    if (idx.empty()) return;
+    Account& acc = a.pf.accounts[idx[std::clamp(filteredIdx, 0, (int)idx.size() - 1)]];
     acc.txs.push_back({todayStr(), desc, amount});
     sortTxs(acc);
 }
@@ -206,6 +220,10 @@ static bool submitAddMovement(App& a) {
     FormBufs& b = a.bufs;
     Account* acc = selAccount(a);
     if (!acc) { b.error = "No account selected"; return false; }
+    if (acc->type == AccountType::Deposit) {
+        b.error = "Deposits have no movements; adjust their terms instead";
+        return false;
+    }
     auto amt = parseNum(b.amount);
     if (!amt || *amt == 0) { b.error = "Amount must be a non-zero number"; return false; }
     std::string date = b.date[0] ? b.date : todayStr();
@@ -369,7 +387,7 @@ static void drawForms(App& a) {
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText(b.typeIdx == 1 ? "NAV per unit" : "Price per unit", b.price,
                          sizeof b.price);
-        ComboStrings("Pay from account", &b.accIdx, accountNames(a.pf));
+        ComboStrings("Pay from account", &b.accIdx, moneyAccNames(a.pf));
         finish(formFooter(a) && submitBuy(a));
     }
     if (beginModal("Deposit terms")) {
@@ -396,7 +414,7 @@ static void drawForms(App& a) {
         }
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText("Price per unit", b.price, sizeof b.price);
-        ComboStrings("Deposit to account", &b.accIdx, accountNames(a.pf));
+        ComboStrings("Deposit to account", &b.accIdx, moneyAccNames(a.pf));
         finish(formFooter(a) && submitSell(a));
     }
     if (beginModal("Update price / NAV")) {
@@ -597,39 +615,80 @@ static void tabMovements(App& a) {
         ImGui::EndChild();
         return;
     }
+    bool isDeposit = acc->type == AccountType::Deposit;
     ImGui::PushFont(fBig);
     ImGui::TextUnformatted(acc->name.c_str());
     ImGui::PopFont();
     ImGui::SameLine();
-    ImGui::TextColored(C_DIM, " %s account - %d movements", accTypeName(acc->type),
-                       (int)acc->txs.size());
-    if (acc->type == AccountType::Deposit) {
-        ImGui::SameLine();
-        if (acc->rate > 0)
-            ImGui::TextColored(C_YELLOW, " %s%% APR, accrued %s since %s",
-                               fmtNum(acc->rate, 2).c_str(), fmtMoney(acc->accrued()).c_str(),
-                               acc->since.c_str());
-        else
-            ImGui::TextColored(C_DIM, " no interest rate set");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Terms")) openForm(a, FormKind::EditDeposit);
-    }
+    if (isDeposit)
+        ImGui::TextColored(C_DIM, " Deposit");
+    else
+        ImGui::TextColored(C_DIM, " %s account - %d movements", accTypeName(acc->type),
+                           (int)acc->txs.size());
     ImGui::SameLine();
     {
-        // balance + button right-aligned
+        // balance (+ button on money accounts) right-aligned
         std::string bal = fmtMoney(acc->balance());
-        float bw = ImGui::CalcTextSize(bal.c_str()).x * (fBig->FontSize / fBody->FontSize);
-        float btnW = 130;
+        ImGui::PushFont(fBig);
+        float bw = ImGui::CalcTextSize(bal.c_str()).x;
+        ImGui::PopFont();
+        float btnW = isDeposit ? 0 : 146;
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw -
-                             btnW - 16);
+                             btnW - 8);
         ImGui::PushFont(fBig);
         ImGui::TextColored(C_GREEN, "%s", bal.c_str());
         ImGui::PopFont();
-        ImGui::SameLine();
-        if (AccentButton("+ Movement", C_GREEN, C_DARK, ImVec2(btnW, 0)))
-            openForm(a, FormKind::AddMovement);
+        if (!isDeposit) {
+            ImGui::SameLine();
+            if (AccentButton("+ Movement", C_GREEN, C_DARK, ImVec2(130, 0)))
+                openForm(a, FormKind::AddMovement);
+        }
     }
     ImGui::Spacing();
+
+    if (isDeposit) {
+        // deposits have no movement register: show the terms and accrual detail
+        ImGui::BeginChild("depcard", ImVec2(460, 0), ImGuiChildFlags_Borders |
+                                                         ImGuiChildFlags_AutoResizeY);
+        ImGui::TextColored(C_YELLOW, "DEPOSIT DETAILS");
+        ImGui::Separator();
+        if (ImGui::BeginTable("dep", 2)) {
+            ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+            ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthStretch);
+            auto row = [](const char* k, const std::string& v, const ImVec4& col = C_TEXT) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextColored(C_DIM, "%s", k);
+                ImGui::TableNextColumn();
+                TextRight(v, col);
+            };
+            row("Principal", fmtMoney(acc->balance()));
+            if (acc->rate > 0) {
+                row("Annual interest rate", fmtNum(acc->rate, 2) + "%");
+                row("Accruing since", acc->since);
+                row("Accrued unpaid interest", fmtMoney(acc->accrued()), C_YELLOW);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextColored(C_DIM, "Value incl. accrued");
+                ImGui::TableNextColumn();
+                TextRight(fmtMoney(acc->balance() + acc->accrued()), C_GREEN, fBig);
+            } else {
+                row("Annual interest rate", "not set", C_ORANGE);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+        if (AccentButton("Edit terms", C_YELLOW, C_DARK, ImVec2(130, 0)))
+            openForm(a, FormKind::EditDeposit);
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(C_DIM, "When interest is paid out, add a movement to a bank "
+                                  "account and move the accrual date forward here.");
+        ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+        ImGui::EndChild();
+        return;
+    }
 
     float footerH = ImGui::GetTextLineHeightWithSpacing();
     ImGui::BeginChild("txs", ImVec2(0, -footerH));
@@ -917,6 +976,7 @@ int main() {
     // debug hooks for headless testing / screenshots
     const char* shotPath = SDL_getenv("MSMONEY_SHOT");
     if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
+    if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
         openForm(a, (FormKind)std::clamp(atoi(fk), 0, 6));
     int frame = 0;

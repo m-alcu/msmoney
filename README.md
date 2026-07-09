@@ -13,9 +13,10 @@ falling back to ImGui's built-in font.
   (simple interest, ACT/365) that counts toward the subtotal and net worth.
 - **Movements** — per-account transaction register with running balance,
   add movements (income/expense), create new accounts (Cash / Bank / Deposit).
-  Deposits take an annual interest rate and accrual start date, editable later
-  via the *Terms* button; when the bank actually pays the interest, record it
-  as a movement and move the accrual date forward.
+  Deposits have no movement register: selecting one shows a detail card with
+  principal, rate, accrual start and accrued interest, plus an *Edit terms*
+  button. When the bank actually pays the interest, record it as a movement
+  on a bank account and move the deposit's accrual date forward.
 - **Investments** — stocks and funds with units, average buy price, current
   price (NAV for funds), market value and gain. Buy/Sell (linked to a cash
   account movement) and manual price/NAV updates.
