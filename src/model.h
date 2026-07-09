@@ -16,8 +16,11 @@ struct Account {
     std::string name;
     AccountType type = AccountType::Bank;
     double initial = 0;
+    double rate = 0;        // deposits: annual interest rate in %
+    std::string since;      // deposits: accrual start date (YYYY-MM-DD)
     std::vector<Transaction> txs;
     double balance() const;
+    double accrued() const;  // accrued unpaid interest (deposits only)
 };
 
 struct Asset {
@@ -41,9 +44,10 @@ struct Portfolio {
     Account* findAccount(const std::string& name);
     Asset* findAsset(const std::string& name);
     double totalByType(AccountType t) const;
+    double accruedInterest() const;  // sum over all deposits
     double investmentsValue() const;
     double investmentsCost() const;
-    double netWorth() const;
+    double netWorth() const;         // includes accrued unpaid interest
 
     bool load(const std::string& path);
     bool save(const std::string& path) const;

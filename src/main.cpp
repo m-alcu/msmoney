@@ -36,11 +36,11 @@ static ImFont* fBig = nullptr;
 static ImFont* fHuge = nullptr;
 
 // ---- app state -------------------------------------------------------------
-enum class FormKind { None, AddMovement, NewAccount, Buy, Sell, SetPrice };
+enum class FormKind { None, AddMovement, NewAccount, Buy, Sell, SetPrice, EditDeposit };
 
 struct FormBufs {
     char date[16]{}, desc[128]{}, name[64]{}, amount[32]{}, units[32]{}, price[32]{},
-        initial[32]{};
+        initial[32]{}, rate[16]{};
     int typeIdx = 0;   // account or asset type
     int accIdx = 0;    // pay-from / deposit-to account
     int assetIdx = 0;  // sell / update-price target
@@ -164,6 +164,14 @@ static void openForm(App& a, FormKind k) {
         case FormKind::NewAccount:
             b.typeIdx = 1;  // Bank
             snprintf(b.initial, sizeof b.initial, "0");
+            snprintf(b.date, sizeof b.date, "%s", todayStr().c_str());  // accrual start
+            break;
+        case FormKind::EditDeposit:
+            if (Account* acc = selAccount(a)) {
+                snprintf(b.rate, sizeof b.rate, "%s", fmtNum(acc->rate, 2).c_str());
+                snprintf(b.date, sizeof b.date, "%s",
+                         acc->since.empty() ? todayStr().c_str() : acc->since.c_str());
+            }
             break;
         case FormKind::Buy:
             if (as) {
@@ -216,7 +224,15 @@ static bool submitNewAccount(App& a) {
     AccountType t = b.typeIdx == 0   ? AccountType::Cash
                     : b.typeIdx == 2 ? AccountType::Deposit
                                      : AccountType::Bank;
-    a.pf.accounts.push_back({a.pf.nextId++, b.name, t, ini ? *ini : 0.0, {}});
+    Account acc{a.pf.nextId++, b.name, t, ini ? *ini : 0.0, 0, "", {}};
+    if (t == AccountType::Deposit) {
+        auto r = parseNum(b.rate);
+        if (r && *r > 0) {
+            acc.rate = *r;
+            acc.since = b.date[0] ? b.date : todayStr();
+        }
+    }
+    a.pf.accounts.push_back(acc);
     a.selAcc = (int)a.pf.accounts.size() - 1;
     setStatus(a, std::string("Account created: ") + b.name);
     return true;
@@ -266,6 +282,18 @@ static bool submitSell(App& a) {
                     "Sell " + fmtNum(*units, 2) + " " + as.name + " @ " + fmtNum(*price, 2),
                     *units * *price);
     setStatus(a, "Sold " + as.name + ", realized P/L " + fmtMoney(realized));
+    return true;
+}
+
+static bool submitEditDeposit(App& a) {
+    FormBufs& b = a.bufs;
+    Account* acc = selAccount(a);
+    if (!acc) { b.error = "No account selected"; return false; }
+    auto r = parseNum(b.rate);
+    if (!r || *r < 0) { b.error = "Rate must be a number >= 0"; return false; }
+    acc->rate = *r;
+    acc->since = b.date[0] ? b.date : todayStr();
+    setStatus(a, acc->name + ": " + fmtNum(*r, 2) + "% APR since " + acc->since);
     return true;
 }
 
@@ -328,6 +356,10 @@ static void drawForms(App& a) {
         static const std::vector<std::string> types = {"Cash", "Bank", "Deposit"};
         ComboStrings("Type", &b.typeIdx, types);
         ImGui::InputText("Initial balance", b.initial, sizeof b.initial);
+        if (b.typeIdx == 2) {  // Deposit
+            ImGui::InputText("Annual interest %", b.rate, sizeof b.rate);
+            ImGui::InputText("Interest since (YYYY-MM-DD)", b.date, sizeof b.date);
+        }
         finish(formFooter(a) && submitNewAccount(a));
     }
     if (beginModal("Buy stock / fund")) {
@@ -335,9 +367,19 @@ static void drawForms(App& a) {
         static const std::vector<std::string> types = {"Stock", "Fund"};
         ComboStrings("Type", &b.typeIdx, types);
         ImGui::InputText("Units", b.units, sizeof b.units);
-        ImGui::InputText("Price per unit", b.price, sizeof b.price);
+        ImGui::InputText(b.typeIdx == 1 ? "NAV per unit" : "Price per unit", b.price,
+                         sizeof b.price);
         ComboStrings("Pay from account", &b.accIdx, accountNames(a.pf));
         finish(formFooter(a) && submitBuy(a));
+    }
+    if (beginModal("Deposit terms")) {
+        if (Account* acc = selAccount(a))
+            ImGui::TextColored(C_DIM, "%s - balance %s", acc->name.c_str(),
+                               fmtMoney(acc->balance()).c_str());
+        ImGui::InputText("Annual interest %", b.rate, sizeof b.rate);
+        ImGui::InputText("Accruing since (YYYY-MM-DD)", b.date, sizeof b.date);
+        ImGui::TextColored(C_DIM, "Simple interest, ACT/365, on the current balance.");
+        finish(formFooter(a) && submitEditDeposit(a));
     }
     // picking another asset refreshes the prefilled price for that asset
     auto refreshPrice = [&] {
@@ -357,13 +399,16 @@ static void drawForms(App& a) {
         ComboStrings("Deposit to account", &b.accIdx, accountNames(a.pf));
         finish(formFooter(a) && submitSell(a));
     }
-    if (beginModal("Update price")) {
+    if (beginModal("Update price / NAV")) {
         if (ComboStrings("Asset", &b.assetIdx, assetNames(a.pf))) refreshPrice();
+        bool isFund = false;
         if (!a.pf.assets.empty()) {
             Asset& as = a.pf.assets[std::clamp(b.assetIdx, 0, (int)a.pf.assets.size() - 1)];
-            ImGui::TextColored(C_DIM, "Current price: %s", fmtMoney(as.price).c_str());
+            isFund = as.type == AssetType::Fund;
+            ImGui::TextColored(C_DIM, "Current %s: %s", isFund ? "NAV" : "price",
+                               fmtMoney(as.price).c_str());
         }
-        ImGui::InputText("New price", b.price, sizeof b.price);
+        ImGui::InputText(isFund ? "New NAV" : "New price", b.price, sizeof b.price);
         finish(formFooter(a) && submitSetPrice(a));
     }
 }
@@ -435,8 +480,15 @@ static void tabGlobal(App& a) {
         section("CASH", C_GREEN, rowsFor(AccountType::Cash), pf.totalByType(AccountType::Cash));
         section("BANK ACCOUNTS", C_BLUE, rowsFor(AccountType::Bank),
                 pf.totalByType(AccountType::Bank));
-        section("DEPOSITS", C_YELLOW, rowsFor(AccountType::Deposit),
-                pf.totalByType(AccountType::Deposit));
+        std::vector<SRow> deps;
+        for (auto& acc : pf.accounts)
+            if (acc.type == AccountType::Deposit)
+                deps.push_back({acc.name, acc.balance(),
+                                acc.rate > 0 ? fmtNum(acc.rate, 2) + "%" : "", C_DIM});
+        double accr = pf.accruedInterest();
+        if (accr > 0.005)
+            deps.push_back({"Accrued interest (unpaid)", accr, "", C_DIM});
+        section("DEPOSITS", C_YELLOW, deps, pf.totalByType(AccountType::Deposit) + accr);
 
         ImGui::TableNextColumn();
         std::vector<SRow> inv;
@@ -451,7 +503,8 @@ static void tabGlobal(App& a) {
         // asset allocation bar
         double cash = std::max(0.0, pf.totalByType(AccountType::Cash));
         double bank = std::max(0.0, pf.totalByType(AccountType::Bank));
-        double depo = std::max(0.0, pf.totalByType(AccountType::Deposit));
+        double depo = std::max(0.0, pf.totalByType(AccountType::Deposit) +
+                                        pf.accruedInterest());
         double stocks = 0, funds = 0;
         for (auto& s : pf.assets)
             (s.type == AssetType::Stock ? stocks : funds) += std::max(0.0, s.value());
@@ -549,6 +602,17 @@ static void tabMovements(App& a) {
     ImGui::SameLine();
     ImGui::TextColored(C_DIM, " %s account - %d movements", accTypeName(acc->type),
                        (int)acc->txs.size());
+    if (acc->type == AccountType::Deposit) {
+        ImGui::SameLine();
+        if (acc->rate > 0)
+            ImGui::TextColored(C_YELLOW, " %s%% APR, accrued %s since %s",
+                               fmtNum(acc->rate, 2).c_str(), fmtMoney(acc->accrued()).c_str(),
+                               acc->since.c_str());
+        else
+            ImGui::TextColored(C_DIM, " no interest rate set");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Terms")) openForm(a, FormKind::EditDeposit);
+    }
     ImGui::SameLine();
     {
         // balance + button right-aligned
@@ -629,7 +693,7 @@ static void tabInvest(App& a) {
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("Units", ImGuiTableColumnFlags_WidthFixed, 90.0f);
         ImGui::TableSetupColumn("Avg buy", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-        ImGui::TableSetupColumn("Price", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Price/NAV", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 120.0f);
         ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 70.0f);
@@ -738,7 +802,7 @@ static void drawUI(App& a) {
     // open pending popup, then draw all modals
     if (a.pending != FormKind::None) {
         const char* ids[] = {"", "Add movement", "New account", "Buy stock / fund",
-                             "Sell stock / fund", "Update price"};
+                             "Sell stock / fund", "Update price / NAV", "Deposit terms"};
         ImGui::OpenPopup(ids[(int)a.pending]);
         a.pending = FormKind::None;
     }
@@ -853,7 +917,7 @@ int main() {
     const char* shotPath = SDL_getenv("MSMONEY_SHOT");
     if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
-        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 5));
+        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 6));
     int frame = 0;
 
     bool running = true;

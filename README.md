@@ -8,12 +8,17 @@ falling back to ImGui's built-in font.
 ## Features
 
 - **Global Position** — net worth at a glance: cash, bank accounts, deposits
-  and investments with subtotals, plus an asset-allocation bar.
+  and investments with subtotals, plus an asset-allocation bar. Deposits show
+  their interest rate and an "Accrued interest (unpaid)" line computed daily
+  (simple interest, ACT/365) that counts toward the subtotal and net worth.
 - **Movements** — per-account transaction register with running balance,
   add movements (income/expense), create new accounts (Cash / Bank / Deposit).
+  Deposits take an annual interest rate and accrual start date, editable later
+  via the *Terms* button; when the bank actually pays the interest, record it
+  as a movement and move the accrual date forward.
 - **Investments** — stocks and funds with units, average buy price, current
-  price, market value and gain. Buy/Sell (linked to a cash account movement)
-  and manual price updates.
+  price (NAV for funds), market value and gain. Buy/Sell (linked to a cash
+  account movement) and manual price/NAV updates.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
   directory. Delete the file to start over with sample data.
 
@@ -38,7 +43,8 @@ cmake --build build -j
 `msmoney.dat` is line-based, `|`-separated:
 
 ```
-ACCOUNT|id|name|type|initial      (type: 0 cash, 1 bank, 2 deposit)
+ACCOUNT|id|name|type|initial|rate|since   (type: 0 cash, 1 bank, 2 deposit;
+                                           rate/since: deposit interest terms)
 TX|accountId|date|description|amount
 ASSET|id|name|type|units|avgPrice|price   (type: 0 stock, 1 fund)
 ```

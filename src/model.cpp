@@ -12,6 +12,33 @@ double Account::balance() const {
     return b;
 }
 
+// days between two YYYY-MM-DD dates (to - from), negative if to < from
+static long daysBetween(const std::string& from, const std::string& to) {
+    auto parse = [](const std::string& s, tm& out) {
+        int y, m, d;
+        if (sscanf(s.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return false;
+        out = tm{};
+        out.tm_year = y - 1900;
+        out.tm_mon = m - 1;
+        out.tm_mday = d;
+        out.tm_hour = 12;  // midday avoids DST edge cases
+        return true;
+    };
+    tm a{}, b{};
+    if (!parse(from, a) || !parse(to, b)) return 0;
+    time_t ta = mktime(&a), tb = mktime(&b);
+    if (ta == (time_t)-1 || tb == (time_t)-1) return 0;
+    return (long)((tb - ta) / 86400);
+}
+
+double Account::accrued() const {
+    if (type != AccountType::Deposit || rate <= 0 || since.empty()) return 0;
+    long days = daysBetween(since, todayStr());
+    if (days <= 0) return 0;
+    // simple interest, ACT/365, on the current deposit balance
+    return balance() * rate / 100.0 * (double)days / 365.0;
+}
+
 Account* Portfolio::findAccount(const std::string& name) {
     for (auto& a : accounts)
         if (a.name == name) return &a;
@@ -31,6 +58,12 @@ double Portfolio::totalByType(AccountType t) const {
     return s;
 }
 
+double Portfolio::accruedInterest() const {
+    double s = 0;
+    for (const auto& a : accounts) s += a.accrued();
+    return s;
+}
+
 double Portfolio::investmentsValue() const {
     double s = 0;
     for (const auto& a : assets) s += a.value();
@@ -45,7 +78,7 @@ double Portfolio::investmentsCost() const {
 
 double Portfolio::netWorth() const {
     return totalByType(AccountType::Cash) + totalByType(AccountType::Bank) +
-           totalByType(AccountType::Deposit) + investmentsValue();
+           totalByType(AccountType::Deposit) + accruedInterest() + investmentsValue();
 }
 
 std::string todayStr() {
@@ -95,7 +128,8 @@ bool Portfolio::save(const std::string& path) const {
     f << "# msmoney data file\n";
     for (const auto& a : accounts) {
         f << "ACCOUNT|" << a.id << '|' << clean(a.name) << '|' << (int)a.type
-          << '|' << fmtNum(a.initial, 2) << '\n';
+          << '|' << fmtNum(a.initial, 2) << '|' << fmtNum(a.rate, 3) << '|' << a.since
+          << '\n';
         for (const auto& t : a.txs)
             f << "TX|" << a.id << '|' << t.date << '|' << clean(t.desc)
               << '|' << fmtNum(t.amount, 2) << '\n';
@@ -123,6 +157,8 @@ bool Portfolio::load(const std::string& path) {
             a.name = p[2];
             a.type = (AccountType)atoi(p[3].c_str());
             a.initial = atof(p[4].c_str());
+            if (p.size() > 5) a.rate = atof(p[5].c_str());
+            if (p.size() > 6) a.since = p[6];
             accounts.push_back(a);
             nextId = std::max(nextId, a.id + 1);
         } else if (p[0] == "TX" && p.size() >= 5) {
@@ -165,10 +201,8 @@ void Portfolio::seed() {
     savings.txs = {
         {"2026-07-01", "Monthly saving", 300.00},
     };
-    Account deposit{nextId++, "Fixed Deposit 12m 3.1%", AccountType::Deposit, 10000.0, {}};
-    deposit.txs = {
-        {"2026-07-01", "Interest payment", 25.80},
-    };
+    Account deposit{nextId++, "Fixed Deposit 12m", AccountType::Deposit, 10000.0, 3.1,
+                    "2026-01-01", {}};
     accounts = {wallet, checking, savings, deposit};
 
     assets = {
