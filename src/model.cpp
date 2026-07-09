@@ -39,6 +39,39 @@ double Account::accrued() const {
     return balance() * rate / 100.0 * (double)days / 365.0;
 }
 
+// walk the trade history chronologically with the average-cost method
+static void walkTrades(const std::vector<AssetTx>& txs, double& units, double& avg,
+                       double& realized) {
+    units = 0;
+    avg = 0;
+    realized = 0;
+    for (const auto& t : txs) {
+        if (t.units > 0) {
+            avg = (units * avg + t.units * t.price) / (units + t.units);
+            units += t.units;
+        } else {
+            double sold = std::min(-t.units, units);
+            realized += sold * (t.price - avg);
+            units -= sold;
+            if (units < 1e-9) units = 0;  // avg stays for reporting
+        }
+    }
+}
+
+void Asset::recompute() {
+    if (txs.empty()) return;  // legacy asset without history: keep stored figures
+    double u, avg, realized;
+    walkTrades(txs, u, avg, realized);
+    units = u;
+    avgPrice = avg;
+}
+
+double Asset::realizedGain() const {
+    double u, avg, realized;
+    walkTrades(txs, u, avg, realized);
+    return realized;
+}
+
 Account* Portfolio::findAccount(const std::string& name) {
     for (auto& a : accounts)
         if (a.name == name) return &a;
@@ -134,10 +167,14 @@ bool Portfolio::save(const std::string& path) const {
             f << "TX|" << a.id << '|' << t.date << '|' << clean(t.desc)
               << '|' << fmtNum(t.amount, 2) << '\n';
     }
-    for (const auto& s : assets)
+    for (const auto& s : assets) {
         f << "ASSET|" << s.id << '|' << clean(s.name) << '|' << (int)s.type
           << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
           << '|' << fmtNum(s.price, 4) << '\n';
+        for (const auto& t : s.txs)
+            f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
+              << fmtNum(t.price, 4) << '\n';
+    }
     return true;
 }
 
@@ -176,7 +213,19 @@ bool Portfolio::load(const std::string& path) {
             s.price = atof(p[6].c_str());
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
+        } else if (p[0] == "ATX" && p.size() >= 5) {
+            int id = atoi(p[1].c_str());
+            for (auto& s : assets)
+                if (s.id == id)
+                    s.txs.push_back({p[2], atof(p[3].c_str()), atof(p[4].c_str())});
         }
+    }
+    // files from before trade history: turn the stored position into an
+    // opening trade so gains can be computed from the history
+    for (auto& s : assets) {
+        if (s.txs.empty() && s.units > 0)
+            s.txs.push_back({"", s.units, s.avgPrice});
+        s.recompute();
     }
     return true;
 }
@@ -206,9 +255,14 @@ void Portfolio::seed() {
     accounts = {wallet, checking, savings, deposit};
 
     assets = {
-        {nextId++, "Telefonica", AssetType::Stock, 200, 3.90, 4.36},
-        {nextId++, "Apple", AssetType::Stock, 10, 175.00, 192.30},
-        {nextId++, "iShares MSCI World", AssetType::Fund, 15.5, 82.10, 91.40},
-        {nextId++, "Vanguard Global Bond", AssetType::Fund, 40, 25.30, 24.85},
+        {nextId++, "Telefonica", AssetType::Stock, 0, 0, 4.36,
+         {{"2026-02-10", 150, 3.80}, {"2026-04-22", 50, 4.20}}},
+        {nextId++, "Apple", AssetType::Stock, 0, 0, 192.30,
+         {{"2026-03-05", 14, 175.00}, {"2026-06-18", -4, 188.10}}},
+        {nextId++, "iShares MSCI World", AssetType::Fund, 0, 0, 91.40,
+         {{"2026-01-15", 15.5, 82.10}}},
+        {nextId++, "Vanguard Global Bond", AssetType::Fund, 0, 0, 24.85,
+         {{"2026-04-15", 40, 25.30}}},
     };
+    for (auto& s : assets) s.recompute();
 }

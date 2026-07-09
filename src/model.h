@@ -23,17 +23,28 @@ struct Account {
     double accrued() const;  // accrued unpaid interest (deposits only)
 };
 
+struct AssetTx {
+    std::string date;   // YYYY-MM-DD
+    double units = 0;   // > 0 buy, < 0 sell
+    double price = 0;   // execution price per unit
+    double amount() const { return units * price; }
+};
+
 struct Asset {
     int id = 0;
     std::string name;
     AssetType type = AssetType::Stock;
-    double units = 0;
-    double avgPrice = 0;   // average purchase price
-    double price = 0;      // current market price
+    double units = 0;      // derived from txs by recompute()
+    double avgPrice = 0;   // average purchase price, derived from txs
+    double price = 0;      // current market price / NAV
+    std::vector<AssetTx> txs;
+    void recompute();              // rebuild units/avgPrice from the history
+    double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }
     double cost() const { return units * avgPrice; }
-    double gain() const { return value() - cost(); }
+    double gain() const { return value() - cost(); }  // unrealized
     double gainPct() const { return cost() > 0 ? gain() / cost() * 100.0 : 0; }
+    double totalGain() const { return gain() + realizedGain(); }
 };
 
 struct Portfolio {

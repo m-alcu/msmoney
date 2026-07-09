@@ -18,10 +18,12 @@ falling back to ImGui's built-in font.
   principal, rate, accrual start and accrued interest, plus an *Edit terms*
   button. When the bank actually pays the interest, record it as a movement
   on a bank account and move the deposit's accrual date forward.
-- **Investments** — stocks and funds with units, average buy price, current
-  price (NAV for funds), market value and gain. Buy/Sell only adjust units and
-  average cost (no cash account is involved, and the execution price does not
-  touch the market price); the current price/NAV is set with *Update price*.
+- **Investments** — stocks and funds with a full trade history: every Buy/Sell
+  is stored with its date, units and execution price. Units, average cost
+  (average-cost method), realized P/L and unrealized gain are all computed
+  from that history; selecting an asset shows its movements and per-sale
+  realized P/L. No cash account is involved and the execution price does not
+  touch the market price; the current price/NAV is set with *Update price*.
 - Accounts (including deposits) and assets can be deleted with their red
   *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
@@ -52,4 +54,5 @@ ACCOUNT|id|name|type|initial|rate|since   (type: 0 cash, 1 bank, 2 deposit;
                                            rate/since: deposit interest terms)
 TX|accountId|date|description|amount
 ASSET|id|name|type|units|avgPrice|price   (type: 0 stock, 1 fund)
+ATX|assetId|date|units|price              (trade: units > 0 buy, < 0 sell)
 ```

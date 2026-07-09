@@ -99,6 +99,13 @@ static void sortTxs(Account& acc) {
                      [](const Transaction& x, const Transaction& y) { return x.date < y.date; });
 }
 
+static void addTrade(Asset& as, const std::string& date, double units, double price) {
+    as.txs.push_back({date, units, price});
+    std::stable_sort(as.txs.begin(), as.txs.end(),
+                     [](const AssetTx& x, const AssetTx& y) { return x.date < y.date; });
+    as.recompute();
+}
+
 // ---- small widget helpers --------------------------------------------------
 static void TextRight(const std::string& s, const ImVec4& col = C_TEXT, ImFont* font = nullptr) {
     if (font) ImGui::PushFont(font);
@@ -171,6 +178,7 @@ static void openForm(App& a, FormKind k) {
                 snprintf(b.name, sizeof b.name, "%s", as->name.c_str());
                 b.typeIdx = as->type == AssetType::Fund ? 1 : 0;
             }
+            snprintf(b.date, sizeof b.date, "%s", todayStr().c_str());
             break;
         case FormKind::Sell:
         case FormKind::SetPrice:
@@ -179,6 +187,7 @@ static void openForm(App& a, FormKind k) {
                 Asset& t = a.pf.assets[b.assetIdx];
                 snprintf(b.price, sizeof b.price, "%s", fmtNum(t.price, 2).c_str());
             }
+            snprintf(b.date, sizeof b.date, "%s", todayStr().c_str());
             break;
         default: break;
     }
@@ -232,19 +241,18 @@ static bool submitBuy(App& a) {
     if (!b.name[0]) { b.error = "Asset name is required"; return false; }
     if (!units || *units <= 0) { b.error = "Units must be > 0"; return false; }
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
+    std::string date = b.date[0] ? b.date : todayStr();
     Asset* as = a.pf.findAsset(b.name);
-    if (as) {
-        // the purchase updates units and average cost; the market price/NAV
-        // is only changed through the Update price dialog
-        double newUnits = as->units + *units;
-        as->avgPrice = (as->cost() + *units * *price) / newUnits;
-        as->units = newUnits;
-    } else {
+    if (!as) {
+        // new asset: the market price/NAV starts at the purchase price and is
+        // then only changed through the Update price dialog
         a.pf.assets.push_back({a.pf.nextId++, b.name,
-                               b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, *units,
-                               *price, *price});
+                               b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, 0, 0,
+                               *price, {}});
+        as = &a.pf.assets.back();
         a.selAsset = (int)a.pf.assets.size() - 1;
     }
+    addTrade(*as, date, *units, *price);
     setStatus(a, "Bought " + fmtNum(*units, 2) + " " + b.name + " for " +
                      fmtMoney(*units * *price));
     return true;
@@ -261,8 +269,7 @@ static bool submitSell(App& a) {
     }
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
     double realized = (*price - as.avgPrice) * *units;
-    as.units -= *units;
-    if (as.units < 1e-9) as.units = 0;
+    addTrade(as, b.date[0] ? b.date : todayStr(), -*units, *price);
     setStatus(a, "Sold " + fmtNum(*units, 2) + " " + as.name + ", realized P/L " +
                      fmtMoney(realized));
     return true;
@@ -376,6 +383,7 @@ static void drawForms(App& a) {
         ImGui::InputText("Asset name", b.name, sizeof b.name);
         static const std::vector<std::string> types = {"Stock", "Fund"};
         ComboStrings("Type", &b.typeIdx, types);
+        ImGui::InputText("Date (YYYY-MM-DD)", b.date, sizeof b.date);
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText(b.typeIdx == 1 ? "NAV per unit" : "Price per unit", b.price,
                          sizeof b.price);
@@ -465,6 +473,7 @@ static void drawForms(App& a) {
             ImGui::TextColored(C_DIM, "Held: %s units, avg buy %s", fmtNum(as.units, 2).c_str(),
                                fmtMoney(as.avgPrice).c_str());
         }
+        ImGui::InputText("Date (YYYY-MM-DD)", b.date, sizeof b.date);
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText("Price per unit", b.price, sizeof b.price);
         finish(formFooter(a) && submitSell(a));
@@ -821,18 +830,21 @@ static void tabInvest(App& a) {
     ImGui::Spacing();
 
     float totalsH = ImGui::GetTextLineHeightWithSpacing() + 14;
-    if (ImGui::BeginTable("assets", 8,
+    bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
+    float histH = hasSel ? 210.0f : 0.0f;
+    if (ImGui::BeginTable("assets", 9,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_ScrollY,
-                          ImVec2(0, -totalsH))) {
+                          ImVec2(0, -(totalsH + histH)))) {
         ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("Units", ImGuiTableColumnFlags_WidthFixed, 90.0f);
         ImGui::TableSetupColumn("Avg buy", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("Price/NAV", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 120.0f);
-        ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-        ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("Realized", ImGuiTableColumnFlags_WidthFixed, 105.0f);
+        ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 105.0f);
+        ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 65.0f);
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
         ImGui::TableHeadersRow();
@@ -841,7 +853,9 @@ static void tabInvest(App& a) {
         for (int i = 0; i < (int)pf.assets.size(); i++) {
             Asset& s = pf.assets[i];
             bool sel = i == a.selAsset;
+            double realized = s.realizedGain();
             ImVec4 gc = s.gain() >= 0 ? C_GREEN : C_RED;
+            ImVec4 rc = realized >= 0 ? C_GREEN : C_RED;
             ImGui::PushID(i);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -861,6 +875,8 @@ static void tabInvest(App& a) {
             ImGui::TableNextColumn();
             TextRight(fmtMoney(s.value()));
             ImGui::TableNextColumn();
+            if (realized != 0) TextRight(fmtMoney(realized), rc);
+            ImGui::TableNextColumn();
             TextRight(fmtMoney(s.gain()), gc);
             ImGui::TableNextColumn();
             TextRight((s.gain() >= 0 ? "+" : "") + fmtNum(s.gainPct(), 1), gc);
@@ -870,15 +886,76 @@ static void tabInvest(App& a) {
     }
     if (pf.assets.empty()) ImGui::TextColored(C_DIM, "No assets yet. Click Buy.");
 
+    // movement history of the selected asset
+    if (hasSel) {
+        Asset& s = pf.assets[a.selAsset];
+        ImGui::BeginChild("history", ImVec2(0, histH - 8), ImGuiChildFlags_Borders);
+        ImGui::TextColored(C_ORANGE, "MOVEMENTS - %s", s.name.c_str());
+        ImGui::SameLine();
+        double realized = s.realizedGain();
+        TextRight("realized " + fmtMoney(realized) + "   unrealized " + fmtMoney(s.gain()) +
+                      "   total " + fmtMoney(s.totalGain()),
+                  s.totalGain() >= 0 ? C_GREEN : C_RED);
+        ImGui::Separator();
+        if (ImGui::BeginTable("atx", 6,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_ScrollY)) {
+            ImGui::TableSetupColumn("Date", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableSetupColumn("Operation", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Units", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableSetupColumn("Price", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+            ImGui::TableSetupColumn("Amount", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+            ImGui::TableSetupColumn("Realized P/L", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
+            ImGui::TableHeadersRow();
+            ImGui::PopStyleColor();
+
+            double u = 0, avg = 0;  // running position for per-sell realized P/L
+            for (auto& t : s.txs) {
+                bool buy = t.units > 0;
+                double rowRealized = 0;
+                if (buy) {
+                    avg = (u * avg + t.units * t.price) / (u + t.units);
+                    u += t.units;
+                } else {
+                    double sold = std::min(-t.units, u);
+                    rowRealized = sold * (t.price - avg);
+                    u -= sold;
+                }
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextColored(C_DIM, "%s", t.date.empty() ? "-" : t.date.c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextColored(buy ? C_GREEN : C_ORANGE,
+                                   buy ? (t.date.empty() ? "Opening position" : "Buy")
+                                       : "Sell");
+                ImGui::TableNextColumn();
+                TextRight(fmtNum(std::fabs(t.units), 2));
+                ImGui::TableNextColumn();
+                TextRight(fmtMoney(t.price));
+                ImGui::TableNextColumn();
+                TextRight(fmtMoney(std::fabs(t.amount())), buy ? C_TEXT : C_DIM);
+                ImGui::TableNextColumn();
+                if (!buy)
+                    TextRight(fmtMoney(rowRealized), rowRealized >= 0 ? C_GREEN : C_RED);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+    }
+
     // totals
     double cost = pf.investmentsCost(), value = pf.investmentsValue();
-    ImVec4 gc = value - cost >= 0 ? C_GREEN : C_RED;
+    double realizedTotal = 0;
+    for (auto& s : pf.assets) realizedTotal += s.realizedGain();
+    double total = value - cost + realizedTotal;
+    ImVec4 gc = total >= 0 ? C_GREEN : C_RED;
     ImGui::Separator();
     ImGui::TextColored(C_DIM, "TOTAL  (invested %s)", fmtMoney(cost).c_str());
     ImGui::SameLine();
-    TextRight(fmtMoney(value) + "   " + fmtMoney(value - cost) + "   " +
-                  (value - cost >= 0 ? "+" : "") +
-                  fmtNum(cost > 0 ? (value - cost) / cost * 100 : 0, 1) + "%",
+    TextRight(fmtMoney(value) + "   realized " + fmtMoney(realizedTotal) + "   unrealized " +
+                  fmtMoney(value - cost) + "   total " + fmtMoney(total),
               gc, fBig);
 }
 
@@ -1054,6 +1131,7 @@ int main() {
     const char* shotPath = SDL_getenv("MSMONEY_SHOT");
     if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
+    if (const char* s = SDL_getenv("MSMONEY_ASSET")) a.selAsset = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
         openForm(a, (FormKind)std::clamp(atoi(fk), 0, 9));
     int frame = 0;
