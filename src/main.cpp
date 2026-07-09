@@ -38,14 +38,13 @@ static ImFont* fHuge = nullptr;
 // ---- app state -------------------------------------------------------------
 enum class FormKind {
     None, AddMovement, NewAccount, Buy, Sell, SetPrice, EditDeposit,
-    DeleteAccount, DeleteAsset
+    DeleteAccount, DeleteAsset, DeleteMovement
 };
 
 struct FormBufs {
     char date[16]{}, desc[128]{}, name[64]{}, amount[32]{}, units[32]{}, price[32]{},
         initial[32]{}, rate[16]{};
     int typeIdx = 0;   // account or asset type
-    int accIdx = 0;    // pay-from / deposit-to account
     int assetIdx = 0;  // sell / update-price target
     std::string error;
 };
@@ -55,6 +54,7 @@ struct App {
     std::string path = "msmoney.dat";
     int selAcc = 0;
     int selAsset = -1;
+    int selTx = -1;  // movement pending deletion
     int forceTab = -1;       // one-shot programmatic tab switch
     bool scrollEnd = false;  // one-shot: scroll movement list to bottom
     FormKind pending = FormKind::None;
@@ -97,28 +97,6 @@ static const char* accTypeName(AccountType t) {
 static void sortTxs(Account& acc) {
     std::stable_sort(acc.txs.begin(), acc.txs.end(),
                      [](const Transaction& x, const Transaction& y) { return x.date < y.date; });
-}
-
-// deposits hold a principal + interest terms, they have no movement register;
-// money accounts (cash/bank) are the only valid source/target for operations
-static std::vector<int> moneyAccIdx(const Portfolio& pf) {
-    std::vector<int> v;
-    for (int i = 0; i < (int)pf.accounts.size(); i++)
-        if (pf.accounts[i].type != AccountType::Deposit) v.push_back(i);
-    return v;
-}
-
-static std::vector<std::string> moneyAccNames(const Portfolio& pf) {
-    std::vector<std::string> v;
-    for (int i : moneyAccIdx(pf)) v.push_back(pf.accounts[i].name);
-    return v;
-}
-
-static int firstBankIdx(const Portfolio& pf) {
-    auto idx = moneyAccIdx(pf);
-    for (int j = 0; j < (int)idx.size(); j++)
-        if (pf.accounts[idx[j]].type == AccountType::Bank) return j;
-    return 0;
 }
 
 // ---- small widget helpers --------------------------------------------------
@@ -193,7 +171,6 @@ static void openForm(App& a, FormKind k) {
                 snprintf(b.name, sizeof b.name, "%s", as->name.c_str());
                 b.typeIdx = as->type == AssetType::Fund ? 1 : 0;
             }
-            b.accIdx = firstBankIdx(a.pf);
             break;
         case FormKind::Sell:
         case FormKind::SetPrice:
@@ -202,20 +179,10 @@ static void openForm(App& a, FormKind k) {
                 Asset& t = a.pf.assets[b.assetIdx];
                 snprintf(b.price, sizeof b.price, "%s", fmtNum(t.price, 2).c_str());
             }
-            b.accIdx = firstBankIdx(a.pf);
             break;
         default: break;
     }
     a.pending = k;
-}
-
-// filteredIdx indexes into moneyAccIdx(pf), i.e. the combo shown in dialogs
-static void addCashMovement(App& a, int filteredIdx, const std::string& desc, double amount) {
-    auto idx = moneyAccIdx(a.pf);
-    if (idx.empty()) return;
-    Account& acc = a.pf.accounts[idx[std::clamp(filteredIdx, 0, (int)idx.size() - 1)]];
-    acc.txs.push_back({todayStr(), desc, amount});
-    sortTxs(acc);
 }
 
 // each submit* returns true on success (popup closes) or sets bufs.error
@@ -267,19 +234,17 @@ static bool submitBuy(App& a) {
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
     Asset* as = a.pf.findAsset(b.name);
     if (as) {
+        // the purchase updates units and average cost; the market price/NAV
+        // is only changed through the Update price dialog
         double newUnits = as->units + *units;
         as->avgPrice = (as->cost() + *units * *price) / newUnits;
         as->units = newUnits;
-        as->price = *price;
     } else {
         a.pf.assets.push_back({a.pf.nextId++, b.name,
                                b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, *units,
                                *price, *price});
         a.selAsset = (int)a.pf.assets.size() - 1;
     }
-    addCashMovement(a, b.accIdx,
-                    "Buy " + fmtNum(*units, 2) + " " + b.name + " @ " + fmtNum(*price, 2),
-                    -(*units * *price));
     setStatus(a, "Bought " + fmtNum(*units, 2) + " " + b.name + " for " +
                      fmtMoney(*units * *price));
     return true;
@@ -297,12 +262,19 @@ static bool submitSell(App& a) {
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
     double realized = (*price - as.avgPrice) * *units;
     as.units -= *units;
-    as.price = *price;
     if (as.units < 1e-9) as.units = 0;
-    addCashMovement(a, b.accIdx,
-                    "Sell " + fmtNum(*units, 2) + " " + as.name + " @ " + fmtNum(*price, 2),
-                    *units * *price);
-    setStatus(a, "Sold " + as.name + ", realized P/L " + fmtMoney(realized));
+    setStatus(a, "Sold " + fmtNum(*units, 2) + " " + as.name + ", realized P/L " +
+                     fmtMoney(realized));
+    return true;
+}
+
+static bool submitDeleteMovement(App& a) {
+    Account* acc = selAccount(a);
+    if (!acc || a.selTx < 0 || a.selTx >= (int)acc->txs.size()) return false;
+    setStatus(a, "Deleted movement: " + acc->txs[a.selTx].desc + " (" +
+                     fmtMoney(acc->txs[a.selTx].amount) + ")");
+    acc->txs.erase(acc->txs.begin() + a.selTx);
+    a.selTx = -1;
     return true;
 }
 
@@ -407,7 +379,8 @@ static void drawForms(App& a) {
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText(b.typeIdx == 1 ? "NAV per unit" : "Price per unit", b.price,
                          sizeof b.price);
-        ComboStrings("Pay from account", &b.accIdx, moneyAccNames(a.pf));
+        ImGui::TextColored(C_DIM, "Only units and average cost change; update the\n"
+                                  "market price/NAV separately.");
         finish(formFooter(a) && submitBuy(a));
     }
     if (beginModal("Delete account")) {
@@ -449,6 +422,27 @@ static void drawForms(App& a) {
             ImGui::EndPopup();
         }
     }
+    if (beginModal("Delete movement")) {
+        Account* acc = selAccount(a);
+        if (acc && a.selTx >= 0 && a.selTx < (int)acc->txs.size()) {
+            Transaction& t = acc->txs[a.selTx];
+            ImGui::Text("Delete this movement from \"%s\"?", acc->name.c_str());
+            ImGui::TextColored(C_DIM, "%s - %s - %s", t.date.c_str(), t.desc.c_str(),
+                               fmtMoney(t.amount).c_str());
+            ImGui::TextColored(C_RED, "The balance will change by %s. This cannot be undone.",
+                               fmtMoney(-t.amount).c_str());
+            ImGui::Spacing();
+            bool del = AccentButton("Delete", C_RED, C_TEXT, ImVec2(100, 0));
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(100, 0)) ||
+                (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+                ImGui::CloseCurrentPopup();
+            finish(del && submitDeleteMovement(a));
+        } else {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
     if (beginModal("Deposit terms")) {
         if (Account* acc = selAccount(a))
             ImGui::TextColored(C_DIM, "%s - balance %s", acc->name.c_str(),
@@ -473,7 +467,6 @@ static void drawForms(App& a) {
         }
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText("Price per unit", b.price, sizeof b.price);
-        ComboStrings("Deposit to account", &b.accIdx, moneyAccNames(a.pf));
         finish(formFooter(a) && submitSell(a));
     }
     if (beginModal("Update price / NAV")) {
@@ -525,7 +518,7 @@ static void section(const char* title, const ImVec4& accent, const std::vector<S
         ImGui::TextColored(C_DIM, "Subtotal");
         ImGui::TableNextColumn();
         ImGui::TableNextColumn();
-        TextRight(fmtMoney(subtotal), accent, fBig);
+        TextRight(fmtMoney(subtotal), accent);
         ImGui::EndTable();
     }
     ImGui::Spacing();
@@ -754,19 +747,22 @@ static void tabMovements(App& a) {
 
     float footerH = ImGui::GetTextLineHeightWithSpacing();
     ImGui::BeginChild("txs", ImVec2(0, -footerH));
-    if (ImGui::BeginTable("txtable", 4,
+    if (ImGui::BeginTable("txtable", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
         ImGui::TableSetupColumn("Date", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Amount", ImGuiTableColumnFlags_WidthFixed, 120.0f);
         ImGui::TableSetupColumn("Balance", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 30.0f);
         ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
         ImGui::TableHeadersRow();
         ImGui::PopStyleColor();
 
         double run = acc->initial;
-        for (auto& t : acc->txs) {
+        for (int i = 0; i < (int)acc->txs.size(); i++) {
+            Transaction& t = acc->txs[i];
             run += t.amount;
+            ImGui::PushID(i);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::TextColored(C_DIM, "%s", t.date.c_str());
@@ -776,6 +772,17 @@ static void tabMovements(App& a) {
             TextRight(fmtMoney(t.amount), t.amount < 0 ? C_RED : C_GREEN);
             ImGui::TableNextColumn();
             TextRight(fmtMoney(run));
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Button, C_RED);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgb(255, 110, 92));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgb(200, 70, 55));
+            if (ImGui::SmallButton("x")) {
+                a.selTx = i;
+                openForm(a, FormKind::DeleteMovement);
+            }
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete this movement");
+            ImGui::PopID();
         }
         ImGui::EndTable();
     }
@@ -932,7 +939,7 @@ static void drawUI(App& a) {
     if (a.pending != FormKind::None) {
         const char* ids[] = {"", "Add movement", "New account", "Buy stock / fund",
                              "Sell stock / fund", "Update price / NAV", "Deposit terms",
-                             "Delete account", "Delete asset"};
+                             "Delete account", "Delete asset", "Delete movement"};
         ImGui::OpenPopup(ids[(int)a.pending]);
         a.pending = FormKind::None;
     }
@@ -1048,7 +1055,7 @@ int main() {
     if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
-        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 8));
+        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 9));
     int frame = 0;
 
     bool running = true;

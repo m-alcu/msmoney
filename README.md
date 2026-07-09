@@ -12,14 +12,16 @@ falling back to ImGui's built-in font.
   their interest rate and an "Accrued interest (unpaid)" line computed daily
   (simple interest, ACT/365) that counts toward the subtotal and net worth.
 - **Movements** — per-account transaction register with running balance,
-  add movements (income/expense), create new accounts (Cash / Bank / Deposit).
+  add movements (income/expense) and delete them (red *x* per row, with
+  confirmation), create new accounts (Cash / Bank / Deposit).
   Deposits have no movement register: selecting one shows a detail card with
   principal, rate, accrual start and accrued interest, plus an *Edit terms*
   button. When the bank actually pays the interest, record it as a movement
   on a bank account and move the deposit's accrual date forward.
 - **Investments** — stocks and funds with units, average buy price, current
-  price (NAV for funds), market value and gain. Buy/Sell (linked to a cash
-  account movement) and manual price/NAV updates.
+  price (NAV for funds), market value and gain. Buy/Sell only adjust units and
+  average cost (no cash account is involved, and the execution price does not
+  touch the market price); the current price/NAV is set with *Update price*.
 - Accounts (including deposits) and assets can be deleted with their red
   *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
