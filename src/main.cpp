@@ -36,7 +36,10 @@ static ImFont* fBig = nullptr;
 static ImFont* fHuge = nullptr;
 
 // ---- app state -------------------------------------------------------------
-enum class FormKind { None, AddMovement, NewAccount, Buy, Sell, SetPrice, EditDeposit };
+enum class FormKind {
+    None, AddMovement, NewAccount, Buy, Sell, SetPrice, EditDeposit,
+    DeleteAccount, DeleteAsset
+};
 
 struct FormBufs {
     char date[16]{}, desc[128]{}, name[64]{}, amount[32]{}, units[32]{}, price[32]{},
@@ -315,6 +318,23 @@ static bool submitEditDeposit(App& a) {
     return true;
 }
 
+static bool submitDeleteAccount(App& a) {
+    Account* acc = selAccount(a);
+    if (!acc) return false;
+    setStatus(a, "Deleted account: " + acc->name);
+    a.pf.accounts.erase(a.pf.accounts.begin() + a.selAcc);
+    a.selAcc = std::max(0, a.selAcc - 1);
+    return true;
+}
+
+static bool submitDeleteAsset(App& a) {
+    if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) return false;
+    setStatus(a, "Deleted asset: " + a.pf.assets[a.selAsset].name);
+    a.pf.assets.erase(a.pf.assets.begin() + a.selAsset);
+    a.selAsset = -1;
+    return true;
+}
+
 static bool submitSetPrice(App& a) {
     FormBufs& b = a.bufs;
     if (a.pf.assets.empty()) { b.error = "No assets"; return false; }
@@ -389,6 +409,45 @@ static void drawForms(App& a) {
                          sizeof b.price);
         ComboStrings("Pay from account", &b.accIdx, moneyAccNames(a.pf));
         finish(formFooter(a) && submitBuy(a));
+    }
+    if (beginModal("Delete account")) {
+        if (Account* acc = selAccount(a)) {
+            ImGui::Text("Delete the account \"%s\"?", acc->name.c_str());
+            ImGui::TextColored(C_DIM, "%s - balance %s - %d movements",
+                               accTypeName(acc->type), fmtMoney(acc->balance()).c_str(),
+                               (int)acc->txs.size());
+            ImGui::TextColored(C_RED, "This cannot be undone.");
+            ImGui::Spacing();
+            bool del = AccentButton("Delete", C_RED, C_TEXT, ImVec2(100, 0));
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(100, 0)) ||
+                (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+                ImGui::CloseCurrentPopup();
+            finish(del && submitDeleteAccount(a));
+        } else {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
+    if (beginModal("Delete asset")) {
+        if (a.selAsset >= 0 && a.selAsset < (int)a.pf.assets.size()) {
+            Asset& as = a.pf.assets[a.selAsset];
+            ImGui::Text("Delete the %s \"%s\"?",
+                        as.type == AssetType::Fund ? "fund" : "stock", as.name.c_str());
+            ImGui::TextColored(C_DIM, "%s units - market value %s",
+                               fmtNum(as.units, 2).c_str(), fmtMoney(as.value()).c_str());
+            ImGui::TextColored(C_RED, "This cannot be undone. No cash movement is recorded.");
+            ImGui::Spacing();
+            bool del = AccentButton("Delete", C_RED, C_TEXT, ImVec2(100, 0));
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(100, 0)) ||
+                (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+                ImGui::CloseCurrentPopup();
+            finish(del && submitDeleteAsset(a));
+        } else {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
     }
     if (beginModal("Deposit terms")) {
         if (Account* acc = selAccount(a))
@@ -627,12 +686,12 @@ static void tabMovements(App& a) {
                            (int)acc->txs.size());
     ImGui::SameLine();
     {
-        // balance (+ button on money accounts) right-aligned
+        // balance + buttons right-aligned
         std::string bal = fmtMoney(acc->balance());
         ImGui::PushFont(fBig);
         float bw = ImGui::CalcTextSize(bal.c_str()).x;
         ImGui::PopFont();
-        float btnW = isDeposit ? 0 : 146;
+        float btnW = (isDeposit ? 0 : 146) + 106;  // [+ Movement] + [Delete]
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw -
                              btnW - 8);
         ImGui::PushFont(fBig);
@@ -643,6 +702,9 @@ static void tabMovements(App& a) {
             if (AccentButton("+ Movement", C_GREEN, C_DARK, ImVec2(130, 0)))
                 openForm(a, FormKind::AddMovement);
         }
+        ImGui::SameLine();
+        if (AccentButton("Delete", C_RED, C_TEXT, ImVec2(90, 0)))
+            openForm(a, FormKind::DeleteAccount);
     }
     ImGui::Spacing();
 
@@ -735,13 +797,20 @@ static void tabInvest(App& a) {
     ImGui::TextUnformatted("Stocks & Funds");
     ImGui::PopFont();
     ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 3 * 120 -
-                         16);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 4 * 122 -
+                         8);
     if (AccentButton("Buy", C_GREEN, C_DARK, ImVec2(112, 0))) openForm(a, FormKind::Buy);
     ImGui::SameLine();
     if (AccentButton("Sell", C_ORANGE, C_DARK, ImVec2(112, 0))) openForm(a, FormKind::Sell);
     ImGui::SameLine();
     if (ImGui::Button("Update price", ImVec2(112, 0))) openForm(a, FormKind::SetPrice);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(a.selAsset < 0);
+    if (AccentButton("Delete", C_RED, C_TEXT, ImVec2(112, 0)))
+        openForm(a, FormKind::DeleteAsset);
+    ImGui::EndDisabled();
+    if (a.selAsset < 0 && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Select an asset row first");
     ImGui::Spacing();
 
     float totalsH = ImGui::GetTextLineHeightWithSpacing() + 14;
@@ -862,7 +931,8 @@ static void drawUI(App& a) {
     // open pending popup, then draw all modals
     if (a.pending != FormKind::None) {
         const char* ids[] = {"", "Add movement", "New account", "Buy stock / fund",
-                             "Sell stock / fund", "Update price / NAV", "Deposit terms"};
+                             "Sell stock / fund", "Update price / NAV", "Deposit terms",
+                             "Delete account", "Delete asset"};
         ImGui::OpenPopup(ids[(int)a.pending]);
         a.pending = FormKind::None;
     }
@@ -978,7 +1048,7 @@ int main() {
     if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
-        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 6));
+        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 8));
     int frame = 0;
 
     bool running = true;

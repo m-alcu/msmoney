@@ -20,6 +20,8 @@ falling back to ImGui's built-in font.
 - **Investments** — stocks and funds with units, average buy price, current
   price (NAV for funds), market value and gain. Buy/Sell (linked to a cash
   account movement) and manual price/NAV updates.
+- Accounts (including deposits) and assets can be deleted with their red
+  *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
   directory. Delete the file to start over with sample data.
 
