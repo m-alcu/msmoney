@@ -286,9 +286,16 @@ static bool formFooter(App& a) {
     ImGui::Spacing();
     bool ok = AccentButton("OK", C_GREEN, C_DARK, ImVec2(100, 0));
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape))
+    // Only react to Enter/Escape when the modal itself has focus. While a combo
+    // dropdown (a child popup) is open, those keys belong to the dropdown -
+    // otherwise picking a value with the keyboard would also submit/close the
+    // whole dialog.
+    bool focused = ImGui::IsWindowFocused();
+    if (ImGui::Button("Cancel", ImVec2(100, 0)) ||
+        (focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
         ImGui::CloseCurrentPopup();
-    ok |= ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter);
+    ok |= focused && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                      ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
     return ok;
 }
 
@@ -332,15 +339,30 @@ static void drawForms(App& a) {
         ComboStrings("Pay from account", &b.accIdx, accountNames(a.pf));
         finish(formFooter(a) && submitBuy(a));
     }
+    // picking another asset refreshes the prefilled price for that asset
+    auto refreshPrice = [&] {
+        if (a.pf.assets.empty()) return;
+        Asset& as = a.pf.assets[std::clamp(b.assetIdx, 0, (int)a.pf.assets.size() - 1)];
+        snprintf(b.price, sizeof b.price, "%s", fmtNum(as.price, 2).c_str());
+    };
     if (beginModal("Sell stock / fund")) {
-        ComboStrings("Asset", &b.assetIdx, assetNames(a.pf));
+        if (ComboStrings("Asset", &b.assetIdx, assetNames(a.pf))) refreshPrice();
+        if (!a.pf.assets.empty()) {
+            Asset& as = a.pf.assets[std::clamp(b.assetIdx, 0, (int)a.pf.assets.size() - 1)];
+            ImGui::TextColored(C_DIM, "Held: %s units, avg buy %s", fmtNum(as.units, 2).c_str(),
+                               fmtMoney(as.avgPrice).c_str());
+        }
         ImGui::InputText("Units", b.units, sizeof b.units);
         ImGui::InputText("Price per unit", b.price, sizeof b.price);
         ComboStrings("Deposit to account", &b.accIdx, accountNames(a.pf));
         finish(formFooter(a) && submitSell(a));
     }
     if (beginModal("Update price")) {
-        ComboStrings("Asset", &b.assetIdx, assetNames(a.pf));
+        if (ComboStrings("Asset", &b.assetIdx, assetNames(a.pf))) refreshPrice();
+        if (!a.pf.assets.empty()) {
+            Asset& as = a.pf.assets[std::clamp(b.assetIdx, 0, (int)a.pf.assets.size() - 1)];
+            ImGui::TextColored(C_DIM, "Current price: %s", fmtMoney(as.price).c_str());
+        }
         ImGui::InputText("New price", b.price, sizeof b.price);
         finish(formFooter(a) && submitSetPrice(a));
     }
