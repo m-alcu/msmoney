@@ -1109,7 +1109,7 @@ int main() {
         SDL_Log("window/renderer failed: %s", SDL_GetError());
         return 1;
     }
-    bool vsync = SDL_SetRenderVSync(ren, 1);
+    SDL_SetRenderVSync(ren, 1);  // best effort; frame pacing no longer relies on it
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1139,12 +1139,23 @@ int main() {
     int frame = 0;
 
     bool running = true;
+    Uint64 lastFrame = 0;
     while (running) {
+        // Event-driven loop: sleep until input arrives instead of redrawing
+        // at full speed (SDL may claim vsync support without ever blocking in
+        // RenderPresent, which pins a CPU core). The timeout keeps slow
+        // animations alive: caret blink, status-bar expiry, daily accrual.
+        if (!shotPath) SDL_WaitEventTimeout(nullptr, 250);
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL3_ProcessEvent(&e);
             if (e.type == SDL_EVENT_QUIT) running = false;
         }
+        // during bursts of events (mouse move, typing), still cap at ~60 fps
+        Uint64 now = SDL_GetTicks();
+        if (!shotPath && now - lastFrame < 16) SDL_Delay((Uint32)(16 - (now - lastFrame)));
+        lastFrame = SDL_GetTicks();
+
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -1165,7 +1176,6 @@ int main() {
             running = false;
         }
         SDL_RenderPresent(ren);
-        if (!vsync) SDL_Delay(16);
     }
 
     a.pf.save(a.path);
