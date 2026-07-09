@@ -1,0 +1,9 @@
+# build output
+build/
+
+# Claude Code local settings
+.claude/
+
+# personal finance data (created at runtime)
+msmoney.dat
+imgui.ini

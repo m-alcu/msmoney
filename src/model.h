@@ -1,0 +1,55 @@
+#pragma once
+#include <string>
+#include <vector>
+
+enum class AccountType { Cash, Bank, Deposit };
+enum class AssetType { Stock, Fund };
+
+struct Transaction {
+    std::string date;   // YYYY-MM-DD
+    std::string desc;
+    double amount = 0;  // + income, - expense
+};
+
+struct Account {
+    int id = 0;
+    std::string name;
+    AccountType type = AccountType::Bank;
+    double initial = 0;
+    std::vector<Transaction> txs;
+    double balance() const;
+};
+
+struct Asset {
+    int id = 0;
+    std::string name;
+    AssetType type = AssetType::Stock;
+    double units = 0;
+    double avgPrice = 0;   // average purchase price
+    double price = 0;      // current market price
+    double value() const { return units * price; }
+    double cost() const { return units * avgPrice; }
+    double gain() const { return value() - cost(); }
+    double gainPct() const { return cost() > 0 ? gain() / cost() * 100.0 : 0; }
+};
+
+struct Portfolio {
+    std::vector<Account> accounts;
+    std::vector<Asset> assets;
+    int nextId = 1;
+
+    Account* findAccount(const std::string& name);
+    Asset* findAsset(const std::string& name);
+    double totalByType(AccountType t) const;
+    double investmentsValue() const;
+    double investmentsCost() const;
+    double netWorth() const;
+
+    bool load(const std::string& path);
+    bool save(const std::string& path) const;
+    void seed();   // sample data for first run
+};
+
+std::string todayStr();
+std::string fmtMoney(double v);          // 1,234.56  /  -987.00
+std::string fmtNum(double v, int dec);   // plain number, no separators

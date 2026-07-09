@@ -1,0 +1,180 @@
+#include "model.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+
+double Account::balance() const {
+    double b = initial;
+    for (const auto& t : txs) b += t.amount;
+    return b;
+}
+
+Account* Portfolio::findAccount(const std::string& name) {
+    for (auto& a : accounts)
+        if (a.name == name) return &a;
+    return nullptr;
+}
+
+Asset* Portfolio::findAsset(const std::string& name) {
+    for (auto& a : assets)
+        if (a.name == name) return &a;
+    return nullptr;
+}
+
+double Portfolio::totalByType(AccountType t) const {
+    double s = 0;
+    for (const auto& a : accounts)
+        if (a.type == t) s += a.balance();
+    return s;
+}
+
+double Portfolio::investmentsValue() const {
+    double s = 0;
+    for (const auto& a : assets) s += a.value();
+    return s;
+}
+
+double Portfolio::investmentsCost() const {
+    double s = 0;
+    for (const auto& a : assets) s += a.cost();
+    return s;
+}
+
+double Portfolio::netWorth() const {
+    return totalByType(AccountType::Cash) + totalByType(AccountType::Bank) +
+           totalByType(AccountType::Deposit) + investmentsValue();
+}
+
+std::string todayStr() {
+    time_t t = time(nullptr);
+    tm lt{};
+    localtime_r(&t, &lt);
+    char buf[16];
+    strftime(buf, sizeof buf, "%Y-%m-%d", &lt);
+    return buf;
+}
+
+std::string fmtMoney(double v) {
+    bool neg = v < -0.005;
+    char buf[64];
+    snprintf(buf, sizeof buf, "%.2f", std::fabs(v));
+    std::string s(buf);
+    size_t dot = s.find('.');
+    for (int i = (int)dot - 3; i > 0; i -= 3) s.insert((size_t)i, ",");
+    return (neg ? "-" : "") + s;
+}
+
+std::string fmtNum(double v, int dec) {
+    char buf[64];
+    snprintf(buf, sizeof buf, "%.*f", dec, v);
+    return buf;
+}
+
+// ---- persistence: simple '|'-separated line format ----
+
+static std::string clean(std::string s) {
+    for (auto& c : s)
+        if (c == '|' || c == '\n') c = '/';
+    return s;
+}
+
+static std::vector<std::string> split(const std::string& line) {
+    std::vector<std::string> out;
+    std::stringstream ss(line);
+    std::string part;
+    while (std::getline(ss, part, '|')) out.push_back(part);
+    return out;
+}
+
+bool Portfolio::save(const std::string& path) const {
+    std::ofstream f(path);
+    if (!f) return false;
+    f << "# msmoney data file\n";
+    for (const auto& a : accounts) {
+        f << "ACCOUNT|" << a.id << '|' << clean(a.name) << '|' << (int)a.type
+          << '|' << fmtNum(a.initial, 2) << '\n';
+        for (const auto& t : a.txs)
+            f << "TX|" << a.id << '|' << t.date << '|' << clean(t.desc)
+              << '|' << fmtNum(t.amount, 2) << '\n';
+    }
+    for (const auto& s : assets)
+        f << "ASSET|" << s.id << '|' << clean(s.name) << '|' << (int)s.type
+          << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
+          << '|' << fmtNum(s.price, 4) << '\n';
+    return true;
+}
+
+bool Portfolio::load(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return false;
+    accounts.clear();
+    assets.clear();
+    nextId = 1;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        auto p = split(line);
+        if (p[0] == "ACCOUNT" && p.size() >= 5) {
+            Account a;
+            a.id = atoi(p[1].c_str());
+            a.name = p[2];
+            a.type = (AccountType)atoi(p[3].c_str());
+            a.initial = atof(p[4].c_str());
+            accounts.push_back(a);
+            nextId = std::max(nextId, a.id + 1);
+        } else if (p[0] == "TX" && p.size() >= 5) {
+            int id = atoi(p[1].c_str());
+            for (auto& a : accounts)
+                if (a.id == id)
+                    a.txs.push_back({p[2], p[3], atof(p[4].c_str())});
+        } else if (p[0] == "ASSET" && p.size() >= 7) {
+            Asset s;
+            s.id = atoi(p[1].c_str());
+            s.name = p[2];
+            s.type = (AssetType)atoi(p[3].c_str());
+            s.units = atof(p[4].c_str());
+            s.avgPrice = atof(p[5].c_str());
+            s.price = atof(p[6].c_str());
+            assets.push_back(s);
+            nextId = std::max(nextId, s.id + 1);
+        }
+    }
+    return true;
+}
+
+void Portfolio::seed() {
+    Account wallet{nextId++, "Wallet", AccountType::Cash, 180.0, {}};
+    wallet.txs = {
+        {"2026-06-28", "Coffee", -3.20},
+        {"2026-07-02", "Taxi", -14.50},
+        {"2026-07-05", "Market stall", -22.75},
+    };
+    Account checking{nextId++, "Main Checking", AccountType::Bank, 2350.0, {}};
+    checking.txs = {
+        {"2026-06-25", "Salary June", 2100.00},
+        {"2026-06-27", "Rent", -850.00},
+        {"2026-06-30", "Groceries", -126.40},
+        {"2026-07-01", "Electricity bill", -64.90},
+        {"2026-07-03", "Restaurant", -48.00},
+        {"2026-07-06", "Internet", -35.00},
+    };
+    Account savings{nextId++, "Savings Account", AccountType::Bank, 5200.0, {}};
+    savings.txs = {
+        {"2026-07-01", "Monthly saving", 300.00},
+    };
+    Account deposit{nextId++, "Fixed Deposit 12m 3.1%", AccountType::Deposit, 10000.0, {}};
+    deposit.txs = {
+        {"2026-07-01", "Interest payment", 25.80},
+    };
+    accounts = {wallet, checking, savings, deposit};
+
+    assets = {
+        {nextId++, "Telefonica", AssetType::Stock, 200, 3.90, 4.36},
+        {nextId++, "Apple", AssetType::Stock, 10, 175.00, 192.30},
+        {nextId++, "iShares MSCI World", AssetType::Fund, 15.5, 82.10, 91.40},
+        {nextId++, "Vanguard Global Bond", AssetType::Fund, 40, 25.30, 24.85},
+    };
+}
