@@ -69,7 +69,7 @@ static std::optional<double> parseNum(std::string s) {
     for (auto& c : s)
         if (c == ',') c = '.';
     while (!s.empty() && s.front() == ' ') s.erase(s.begin());
-    while (!s.empty() && s.back() == ' ') s.pop_back();
+    while (!s.empty() && (s.back() == ' ' || s.back() == '%')) s.pop_back();
     if (s.empty()) return std::nullopt;
     char* end = nullptr;
     double v = strtod(s.c_str(), &end);
@@ -224,14 +224,14 @@ static bool submitNewAccount(App& a) {
     AccountType t = b.typeIdx == 0   ? AccountType::Cash
                     : b.typeIdx == 2 ? AccountType::Deposit
                                      : AccountType::Bank;
-    Account acc{a.pf.nextId++, b.name, t, ini ? *ini : 0.0, 0, "", {}};
-    if (t == AccountType::Deposit) {
+    Account acc{0, b.name, t, ini ? *ini : 0.0, 0, "", {}};
+    if (t == AccountType::Deposit && b.rate[0]) {
         auto r = parseNum(b.rate);
-        if (r && *r > 0) {
-            acc.rate = *r;
-            acc.since = b.date[0] ? b.date : todayStr();
-        }
+        if (!r || *r < 0) { b.error = "Interest rate must be a number >= 0"; return false; }
+        acc.rate = *r;
+        acc.since = b.date[0] ? b.date : todayStr();
     }
+    acc.id = a.pf.nextId++;
     a.pf.accounts.push_back(acc);
     a.selAcc = (int)a.pf.accounts.size() - 1;
     setStatus(a, std::string("Account created: ") + b.name);
@@ -484,7 +484,8 @@ static void tabGlobal(App& a) {
         for (auto& acc : pf.accounts)
             if (acc.type == AccountType::Deposit)
                 deps.push_back({acc.name, acc.balance(),
-                                acc.rate > 0 ? fmtNum(acc.rate, 2) + "%" : "", C_DIM});
+                                acc.rate > 0 ? fmtNum(acc.rate, 2) + "%" : "no rate set",
+                                acc.rate > 0 ? C_DIM : C_ORANGE});
         double accr = pf.accruedInterest();
         if (accr > 0.005)
             deps.push_back({"Accrued interest (unpaid)", accr, "", C_DIM});
