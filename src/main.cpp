@@ -886,8 +886,10 @@ static void tabInvest(App& a) {
     }
     if (pf.assets.empty()) ImGui::TextColored(C_DIM, "No assets yet. Click Buy.");
 
-    // movement history of the selected asset
-    if (hasSel) {
+    // movement history of the selected asset. Note: clicking the selected row
+    // toggles the selection off mid-frame, so hasSel (computed before the
+    // table loop) may be stale here - re-check the index before using it.
+    if (a.selAsset >= 0 && a.selAsset < (int)pf.assets.size()) {
         Asset& s = pf.assets[a.selAsset];
         ImGui::BeginChild("history", ImVec2(0, histH - 8), ImGuiChildFlags_Borders);
         ImGui::TextColored(C_ORANGE, "MOVEMENTS - %s", s.name.c_str());
