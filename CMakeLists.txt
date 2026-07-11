@@ -14,6 +14,9 @@ set(IMGUI_DIR src/vendor/imgui)
 add_executable(msmoney
     src/main.cpp
     src/model.cpp
+    src/ui.cpp
+    src/tabs.cpp
+    src/forms.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
@@ -23,3 +26,9 @@ add_executable(msmoney
 )
 target_include_directories(msmoney PRIVATE ${IMGUI_DIR})
 target_link_libraries(msmoney PRIVATE SDL3::SDL3)
+
+# unit tests for the pure model layer; no SDL or ImGui involved
+enable_testing()
+add_executable(model_tests tests/model_tests.cpp src/model.cpp)
+target_include_directories(model_tests PRIVATE src)
+add_test(NAME model_tests COMMAND model_tests)

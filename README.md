@@ -45,6 +45,12 @@ cmake --build build -j
 ./build/msmoney
 ```
 
+Unit tests for the model layer (no SDL/ImGui needed):
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
 ## Controls
 
 - `1` / `2` / `3` / `4` or the top tabs: switch view
