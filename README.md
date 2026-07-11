@@ -5,6 +5,8 @@ SDL3 and Dear ImGui (vendored in `src/vendor/imgui`, using the SDL3 +
 SDL_Renderer backends). Text uses the system DejaVu fonts when available,
 falling back to ImGui's built-in font.
 
+![msmoney — Global Position view](assets/Screen.png)
+
 ## Features
 
 - **Global Position** — net worth at a glance: cash, bank accounts, deposits
