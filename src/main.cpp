@@ -10,11 +10,40 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
+#include <string>
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "model.h"
 #include "ui.h"
+
+// An optional config.ini in the working directory can move the data file
+// somewhere else (e.g. into a synced folder):
+//   data = /home/user/Documents/msmoney.dat
+// Lines starting with # or ; are comments; ~/ expands to $HOME.
+static std::string dataPath() {
+    std::ifstream f("config.ini");
+    std::string line;
+    auto trim = [](std::string s) {
+        size_t b = s.find_first_not_of(" \t");
+        size_t e = s.find_last_not_of(" \t");
+        return b == std::string::npos ? std::string() : s.substr(b, e - b + 1);
+    };
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = trim(line.substr(0, eq)), val = trim(line.substr(eq + 1));
+        if (key == "data" && !val.empty()) {
+            if (val[0] == '~' && (val.size() == 1 || val[1] == '/'))
+                if (const char* home = getenv("HOME")) val = home + val.substr(1);
+            return val;
+        }
+    }
+    return "msmoney.dat";
+}
 
 int main() {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -40,6 +69,7 @@ int main() {
     ImGui_ImplSDLRenderer3_Init(ren);
 
     App a;
+    a.path = dataPath();
     if (!a.pf.load(a.path)) {
         a.pf.seed();
         a.pf.save(a.path);

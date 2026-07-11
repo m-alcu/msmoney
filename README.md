@@ -35,7 +35,8 @@ falling back to ImGui's built-in font.
 - Accounts (including deposits) and assets can be deleted with their red
   *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
-  directory. Delete the file to start over with sample data.
+  directory, or to the path set in `config.ini` (see *Configuration*).
+  Delete the file to start over with sample data.
 
 ## Build
 
@@ -49,6 +50,17 @@ Unit tests for the model layer (no SDL/ImGui needed):
 
 ```sh
 ctest --test-dir build --output-on-failure
+```
+
+## Configuration
+
+An optional `config.ini` in the working directory moves the data file
+somewhere else (e.g. into a synced folder). Lines starting with `#` or `;`
+are comments; `~/` expands to `$HOME`:
+
+```ini
+# where the data file lives (default: msmoney.dat in the working directory)
+data = ~/Documents/msmoney.dat
 ```
 
 ## Controls

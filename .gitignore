@@ -7,4 +7,5 @@ build-asan/
 
 # personal finance data (created at runtime)
 msmoney.dat
+config.ini
 imgui.ini
