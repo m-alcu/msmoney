@@ -38,7 +38,7 @@ static ImFont* fHuge = nullptr;
 // ---- app state -------------------------------------------------------------
 enum class FormKind {
     None, AddMovement, NewAccount, Buy, Sell, SetPrice, EditDeposit,
-    DeleteAccount, DeleteAsset, DeleteMovement
+    DeleteAccount, DeleteAsset, DeleteMovement, DeleteSnapshot
 };
 
 struct FormBufs {
@@ -54,7 +54,8 @@ struct App {
     std::string path = "msmoney.dat";
     int selAcc = 0;
     int selAsset = -1;
-    int selTx = -1;  // movement pending deletion
+    int selTx = -1;    // movement pending deletion
+    int selSnap = -1;  // snapshot pending deletion
     int forceTab = -1;       // one-shot programmatic tab switch
     bool scrollEnd = false;  // one-shot: scroll movement list to bottom
     FormKind pending = FormKind::None;
@@ -314,6 +315,14 @@ static bool submitDeleteAsset(App& a) {
     return true;
 }
 
+static bool submitDeleteSnapshot(App& a) {
+    if (a.selSnap < 0 || a.selSnap >= (int)a.pf.snapshots.size()) return false;
+    setStatus(a, "Deleted snapshot " + a.pf.snapshots[a.selSnap].date);
+    a.pf.snapshots.erase(a.pf.snapshots.begin() + a.selSnap);
+    a.selSnap = -1;
+    return true;
+}
+
 static bool submitSetPrice(App& a) {
     FormBufs& b = a.bufs;
     if (a.pf.assets.empty()) { b.error = "No assets"; return false; }
@@ -446,6 +455,24 @@ static void drawForms(App& a) {
                 (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
                 ImGui::CloseCurrentPopup();
             finish(del && submitDeleteMovement(a));
+        } else {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
+    if (beginModal("Delete snapshot")) {
+        if (a.selSnap >= 0 && a.selSnap < (int)a.pf.snapshots.size()) {
+            Snapshot& s = a.pf.snapshots[a.selSnap];
+            ImGui::Text("Delete the snapshot from %s?", s.date.c_str());
+            ImGui::TextColored(C_DIM, "Recorded net worth: %s", fmtMoney(s.total()).c_str());
+            ImGui::TextColored(C_RED, "This cannot be undone.");
+            ImGui::Spacing();
+            bool del = AccentButton("Delete", C_RED, C_TEXT, ImVec2(100, 0));
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(100, 0)) ||
+                (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+                ImGui::CloseCurrentPopup();
+            finish(del && submitDeleteSnapshot(a));
         } else {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
@@ -961,6 +988,209 @@ static void tabInvest(App& a) {
               gc, fBig);
 }
 
+// ---- timeline tab ------------------------------------------------------------
+// money label for chart axes: like fmtMoney but without the cents
+static std::string fmtAxis(double v) {
+    std::string s = fmtMoney(v);
+    size_t dot = s.rfind('.');
+    return dot == std::string::npos ? s : s.substr(0, dot);
+}
+
+// smallest 1/2/5 * 10^k step that splits range into at most maxTicks intervals
+static double niceStep(double range, int maxTicks) {
+    if (range <= 0) return 1.0;
+    double raw = range / std::max(1, maxTicks);
+    double mag = std::pow(10.0, std::floor(std::log10(raw)));
+    for (double m : {1.0, 2.0, 5.0})
+        if (mag * m >= raw) return mag * m;
+    return mag * 10.0;
+}
+
+static void tabTimeline(App& a) {
+    Portfolio& pf = a.pf;
+    const auto& sn = pf.snapshots;
+    ImGui::Spacing();
+    ImGui::PushFont(fBig);
+    ImGui::TextUnformatted("Timeline");
+    ImGui::PopFont();
+    ImGui::SameLine();
+    ImGui::TextColored(C_DIM, " asset allocation per snapshot - %d stored", (int)sn.size());
+    ImGui::Spacing();
+    if (sn.empty()) {
+        ImGui::TextColored(C_DIM,
+                           "No snapshots yet. Click the Snapshot button (top right) to store\n"
+                           "the current position; each snapshot becomes a point on this chart.");
+        return;
+    }
+
+    struct Series {
+        const char* name;
+        ImVec4 c;
+        double (*get)(const Snapshot&);
+        float th;
+    };
+    const Series series[6] = {
+        {"Cash", C_GREEN, [](const Snapshot& s) { return s.cash; }, 1.5f},
+        {"Bank", C_BLUE, [](const Snapshot& s) { return s.bank; }, 1.5f},
+        {"Deposits", C_YELLOW, [](const Snapshot& s) { return s.deposits; }, 1.5f},
+        {"Stocks", C_ORANGE, [](const Snapshot& s) { return s.stocks; }, 1.5f},
+        {"Funds", C_PURPLE, [](const Snapshot& s) { return s.funds; }, 1.5f},
+        {"Total", C_TEXT, [](const Snapshot& s) { return s.total(); }, 3.0f},
+    };
+
+    int n = (int)sn.size();
+    std::vector<double> xs(n);
+    for (int i = 0; i < n; i++) xs[i] = (double)daysBetween(sn.front().date, sn[i].date);
+    double spanX = std::max(1.0, xs.back());
+
+    double maxV = 0, minV = 0;
+    for (const auto& s : sn)
+        for (const auto& sr : series) {
+            maxV = std::max(maxV, sr.get(s));
+            minV = std::min(minV, sr.get(s));
+        }
+    double step = niceStep((maxV - minV) * 1.05, 5);
+    double yLo = std::floor(minV / step) * step;
+    double yHi = std::ceil((maxV + step * 0.2) / step) * step;
+
+    float tableH = 200.0f;
+    ImGui::BeginChild("chart", ImVec2(0, -tableH), ImGuiChildFlags_Borders);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float legendH = ImGui::GetTextLineHeightWithSpacing() + 8;
+    ImVec2 pl0(p0.x + 92, p0.y + 10);                            // plot area
+    ImVec2 pl1(p0.x + avail.x - 18, p0.y + avail.y - 24 - legendH);
+    if (pl1.x > pl0.x + 60 && pl1.y > pl0.y + 60) {
+        auto px = [&](double x) {
+            if (n == 1) return (pl0.x + pl1.x) * 0.5f;  // single point: center it
+            return pl0.x + (float)(x / spanX) * (pl1.x - pl0.x);
+        };
+        auto py = [&](double v) {
+            return pl1.y - (float)((v - yLo) / (yHi - yLo)) * (pl1.y - pl0.y);
+        };
+        ImU32 cGrid = ImGui::ColorConvertFloat4ToU32(rgb(45, 53, 64));
+        ImU32 cDim = ImGui::ColorConvertFloat4ToU32(C_DIM);
+
+        for (double v = yLo; v <= yHi + step * 0.01; v += step) {
+            float y = py(v);
+            dl->AddLine(ImVec2(pl0.x, y), ImVec2(pl1.x, y), cGrid);
+            std::string lab = fmtAxis(v);
+            float tw = ImGui::CalcTextSize(lab.c_str()).x;
+            dl->AddText(ImVec2(pl0.x - tw - 8, y - ImGui::GetTextLineHeight() * 0.5f), cDim,
+                        lab.c_str());
+        }
+        // date labels under their snapshot, skipping any that would overlap
+        float lastLabEnd = -1e9f;
+        for (int i = 0; i < n; i++) {
+            float x = px(xs[i]);
+            float tw = ImGui::CalcTextSize(sn[i].date.c_str()).x;
+            float lx = std::clamp(x - tw * 0.5f, pl0.x - 40.0f, pl1.x - tw + 12.0f);
+            if (lx < lastLabEnd + 24) continue;
+            dl->AddLine(ImVec2(x, pl0.y), ImVec2(x, pl1.y), cGrid);
+            dl->AddText(ImVec2(lx, pl1.y + 6), cDim, sn[i].date.c_str());
+            lastLabEnd = lx + tw;
+        }
+        dl->AddRect(pl0, pl1, ImGui::ColorConvertFloat4ToU32(C_BORDER));
+
+        std::vector<ImVec2> pts(n);
+        for (const auto& sr : series) {
+            ImU32 col = ImGui::ColorConvertFloat4ToU32(sr.c);
+            for (int i = 0; i < n; i++) pts[i] = ImVec2(px(xs[i]), py(sr.get(sn[i])));
+            if (n > 1) dl->AddPolyline(pts.data(), n, col, 0, sr.th);
+            for (int i = 0; i < n; i++)
+                dl->AddCircleFilled(pts[i], sr.th >= 3.0f ? 4.0f : 3.0f, col);
+        }
+        // hover: vertical marker + tooltip with the nearest snapshot's figures
+        if (ImGui::IsMouseHoveringRect(pl0, pl1)) {
+            float mx = ImGui::GetIO().MousePos.x;
+            int best = 0;
+            for (int i = 1; i < n; i++)
+                if (std::fabs(px(xs[i]) - mx) < std::fabs(px(xs[best]) - mx)) best = i;
+            float x = px(xs[best]);
+            dl->AddLine(ImVec2(x, pl0.y), ImVec2(x, pl1.y), cDim);
+            ImGui::BeginTooltip();
+            ImGui::TextColored(C_DIM, "%s", sn[best].date.c_str());
+            ImGui::Separator();
+            if (ImGui::BeginTable("tt", 2)) {
+                ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+                for (int k = 5; k >= 0; k--) {  // total first
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextColored(series[k].c, "%s", series[k].name);
+                    ImGui::TableNextColumn();
+                    TextRight(fmtMoney(series[k].get(sn[best])));
+                }
+                ImGui::EndTable();
+            }
+            ImGui::EndTooltip();
+        }
+    }
+    // legend with the latest snapshot's values, at the bottom of the chart
+    ImGui::Dummy(ImVec2(avail.x, avail.y - legendH - ImGui::GetStyle().ItemSpacing.y));
+    for (int k = 0; k < 6; k++) {
+        if (k) ImGui::SameLine(0, 20);
+        ImVec2 lp = ImGui::GetCursorScreenPos();
+        dl->AddRectFilled(ImVec2(lp.x, lp.y + 3), ImVec2(lp.x + 12, lp.y + 15),
+                          ImGui::ColorConvertFloat4ToU32(series[k].c));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18);
+        ImGui::TextUnformatted(series[k].name);
+        ImGui::SameLine(0, 6);
+        ImGui::TextColored(C_DIM, "%s", fmtMoney(series[k].get(sn.back())).c_str());
+    }
+    ImGui::EndChild();
+
+    // snapshot history, newest first
+    if (ImGui::BeginTable("snaptable", 8,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_ScrollY)) {
+        ImGui::TableSetupColumn("Date", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Cash", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Bank", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Deposits", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Stocks", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Funds", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 30.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::PushStyleColor(ImGuiCol_Text, C_DIM);
+        ImGui::TableHeadersRow();
+        ImGui::PopStyleColor();
+        for (int i = n - 1; i >= 0; i--) {
+            const Snapshot& s = sn[i];
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextColored(C_DIM, "%s", s.date.c_str());
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.cash));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.bank));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.deposits));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.stocks));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.funds));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.total()), C_GREEN);
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Button, C_RED);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgb(255, 110, 92));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgb(200, 70, 55));
+            if (ImGui::SmallButton("x")) {
+                a.selSnap = i;
+                openForm(a, FormKind::DeleteSnapshot);
+            }
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Delete this snapshot");
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
 // ---- main UI ---------------------------------------------------------------
 static void drawUI(App& a) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -978,6 +1208,7 @@ static void drawUI(App& a) {
         if (ImGui::IsKeyPressed(ImGuiKey_1)) a.forceTab = 0;
         if (ImGui::IsKeyPressed(ImGuiKey_2)) a.forceTab = 1;
         if (ImGui::IsKeyPressed(ImGuiKey_3)) a.forceTab = 2;
+        if (ImGui::IsKeyPressed(ImGuiKey_4)) a.forceTab = 3;
     }
 
     // header: title + tabs
@@ -986,17 +1217,36 @@ static void drawUI(App& a) {
     ImGui::PopFont();
     ImGui::SameLine();
     ImGui::TextColored(C_DIM, "personal finances");
+    ImGui::SameLine();
+    {
+        // global action: record today's position for the Timeline chart
+        float btnW = 120.0f;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
+                             btnW - 8);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
+        bool existed = false;
+        for (auto& s : a.pf.snapshots) existed |= s.date == todayStr();
+        if (AccentButton("Snapshot", C_BLUE, C_DARK, ImVec2(btnW, 0))) {
+            a.pf.takeSnapshot();
+            a.pf.save(a.path);
+            setStatus(a, std::string(existed ? "Snapshot updated for " : "Snapshot stored for ") +
+                             todayStr() + "  -  net worth " + fmtMoney(a.pf.netWorth()));
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Store today's position (one per day) for the Timeline tab");
+    }
 
     float statusH = ImGui::GetTextLineHeightWithSpacing() + 6;
     if (ImGui::BeginTabBar("tabs")) {
-        const char* names[3] = {"Global Position", "Movements", "Investments"};
-        for (int i = 0; i < 3; i++) {
+        const char* names[4] = {"Global Position", "Movements", "Investments", "Timeline"};
+        for (int i = 0; i < 4; i++) {
             ImGuiTabItemFlags flags = a.forceTab == i ? ImGuiTabItemFlags_SetSelected : 0;
             if (ImGui::BeginTabItem(names[i], nullptr, flags)) {
                 ImGui::BeginChild("content", ImVec2(0, -statusH));
                 if (i == 0) tabGlobal(a);
                 else if (i == 1) tabMovements(a);
-                else tabInvest(a);
+                else if (i == 2) tabInvest(a);
+                else tabTimeline(a);
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }
@@ -1012,13 +1262,14 @@ static void drawUI(App& a) {
     else
         ImGui::TextUnformatted(" ");
     ImGui::SameLine();
-    TextRight("1/2/3: tabs  |  click row: select", C_DIM);
+    TextRight("1/2/3/4: tabs  |  click row: select", C_DIM);
 
     // open pending popup, then draw all modals
     if (a.pending != FormKind::None) {
         const char* ids[] = {"", "Add movement", "New account", "Buy stock / fund",
                              "Sell stock / fund", "Update price / NAV", "Deposit terms",
-                             "Delete account", "Delete asset", "Delete movement"};
+                             "Delete account", "Delete asset", "Delete movement",
+                             "Delete snapshot"};
         ImGui::OpenPopup(ids[(int)a.pending]);
         a.pending = FormKind::None;
     }
@@ -1131,11 +1382,11 @@ int main() {
 
     // debug hooks for headless testing / screenshots
     const char* shotPath = SDL_getenv("MSMONEY_SHOT");
-    if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 2);
+    if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 3);
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* s = SDL_getenv("MSMONEY_ASSET")) a.selAsset = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
-        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 9));
+        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 10));
     int frame = 0;
 
     bool running = true;

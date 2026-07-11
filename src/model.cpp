@@ -13,7 +13,7 @@ double Account::balance() const {
 }
 
 // days between two YYYY-MM-DD dates (to - from), negative if to < from
-static long daysBetween(const std::string& from, const std::string& to) {
+long daysBetween(const std::string& from, const std::string& to) {
     auto parse = [](const std::string& s, tm& out) {
         int y, m, d;
         if (sscanf(s.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return false;
@@ -114,6 +114,26 @@ double Portfolio::netWorth() const {
            totalByType(AccountType::Deposit) + accruedInterest() + investmentsValue();
 }
 
+Snapshot Portfolio::makeSnapshot() const {
+    Snapshot s;
+    s.date = todayStr();
+    s.cash = totalByType(AccountType::Cash);
+    s.bank = totalByType(AccountType::Bank);
+    s.deposits = totalByType(AccountType::Deposit) + accruedInterest();
+    for (const auto& as : assets)
+        (as.type == AssetType::Stock ? s.stocks : s.funds) += as.value();
+    return s;
+}
+
+void Portfolio::takeSnapshot() {
+    Snapshot s = makeSnapshot();
+    for (auto& e : snapshots)
+        if (e.date == s.date) { e = s; return; }
+    snapshots.push_back(s);
+    std::sort(snapshots.begin(), snapshots.end(),
+              [](const Snapshot& x, const Snapshot& y) { return x.date < y.date; });
+}
+
 std::string todayStr() {
     time_t t = time(nullptr);
     tm lt{};
@@ -175,6 +195,10 @@ bool Portfolio::save(const std::string& path) const {
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
               << fmtNum(t.price, 4) << '\n';
     }
+    for (const auto& s : snapshots)
+        f << "SNAP|" << s.date << '|' << fmtNum(s.cash, 2) << '|' << fmtNum(s.bank, 2)
+          << '|' << fmtNum(s.deposits, 2) << '|' << fmtNum(s.stocks, 2) << '|'
+          << fmtNum(s.funds, 2) << '\n';
     return true;
 }
 
@@ -183,6 +207,7 @@ bool Portfolio::load(const std::string& path) {
     if (!f) return false;
     accounts.clear();
     assets.clear();
+    snapshots.clear();
     nextId = 1;
     std::string line;
     while (std::getline(f, line)) {
@@ -218,8 +243,19 @@ bool Portfolio::load(const std::string& path) {
             for (auto& s : assets)
                 if (s.id == id)
                     s.txs.push_back({p[2], atof(p[3].c_str()), atof(p[4].c_str())});
+        } else if (p[0] == "SNAP" && p.size() >= 7) {
+            Snapshot s;
+            s.date = p[1];
+            s.cash = atof(p[2].c_str());
+            s.bank = atof(p[3].c_str());
+            s.deposits = atof(p[4].c_str());
+            s.stocks = atof(p[5].c_str());
+            s.funds = atof(p[6].c_str());
+            snapshots.push_back(s);
         }
     }
+    std::sort(snapshots.begin(), snapshots.end(),
+              [](const Snapshot& x, const Snapshot& y) { return x.date < y.date; });
     // files from before trade history: turn the stored position into an
     // opening trade so gains can be computed from the history
     for (auto& s : assets) {

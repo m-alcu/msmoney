@@ -26,6 +26,12 @@ falling back to ImGui's built-in font.
   from that history; selecting an asset shows its movements and per-sale
   realized P/L. No cash account is involved and the execution price does not
   touch the market price; the current price/NAV is set with *Update price*.
+- **Timeline** — net-worth history built from snapshots. The global *Snapshot*
+  button (top right, available from any tab) stores today's position — cash,
+  bank, deposits (incl. accrued interest), stocks and funds — one snapshot per
+  day, re-snapshotting the same day overwrites it. The tab charts every
+  category plus the total over time (hover for exact figures) and lists all
+  snapshots below, where they can be deleted.
 - Accounts (including deposits) and assets can be deleted with their red
   *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
@@ -41,7 +47,7 @@ cmake --build build -j
 
 ## Controls
 
-- `1` / `2` / `3` or the top tabs: switch view
+- `1` / `2` / `3` / `4` or the top tabs: switch view
 - Click an account or asset row to select it
 - Mouse wheel: scroll the movement list
 - In dialogs: `Tab` next field, `Enter` accept, `Esc` cancel.
@@ -57,4 +63,5 @@ ACCOUNT|id|name|type|initial|rate|since   (type: 0 cash, 1 bank, 2 deposit;
 TX|accountId|date|description|amount
 ASSET|id|name|type|units|avgPrice|price   (type: 0 stock, 1 fund)
 ATX|assetId|date|units|price              (trade: units > 0 buy, < 0 sell)
+SNAP|date|cash|bank|deposits|stocks|funds (Timeline snapshot, one per day)
 ```

@@ -47,9 +47,17 @@ struct Asset {
     double totalGain() const { return gain() + realizedGain(); }
 };
 
+// point-in-time record of the asset allocation, one per day at most
+struct Snapshot {
+    std::string date;  // YYYY-MM-DD
+    double cash = 0, bank = 0, deposits = 0, stocks = 0, funds = 0;
+    double total() const { return cash + bank + deposits + stocks + funds; }
+};
+
 struct Portfolio {
     std::vector<Account> accounts;
     std::vector<Asset> assets;
+    std::vector<Snapshot> snapshots;  // kept sorted by date
     int nextId = 1;
 
     Account* findAccount(const std::string& name);
@@ -60,11 +68,15 @@ struct Portfolio {
     double investmentsCost() const;
     double netWorth() const;         // includes accrued unpaid interest
 
+    Snapshot makeSnapshot() const;   // today's allocation (deposits incl. accrued)
+    void takeSnapshot();             // store it, replacing today's if it exists
+
     bool load(const std::string& path);
     bool save(const std::string& path) const;
     void seed();   // sample data for first run
 };
 
 std::string todayStr();
+long daysBetween(const std::string& from, const std::string& to);  // to - from
 std::string fmtMoney(double v);          // 1,234.56  /  -987.00
 std::string fmtNum(double v, int dec);   // plain number, no separators
