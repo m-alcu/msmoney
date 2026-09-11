@@ -190,7 +190,8 @@ bool Portfolio::save(const std::string& path) const {
     for (const auto& s : assets) {
         f << "ASSET|" << s.id << '|' << clean(s.name) << '|' << (int)s.type
           << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
-          << '|' << fmtNum(s.price, 4) << '\n';
+          << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.finectUrl)
+          << '\n';
         for (const auto& t : s.txs)
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
               << fmtNum(t.price, 4) << '\n';
@@ -236,6 +237,8 @@ bool Portfolio::load(const std::string& path) {
             s.units = atof(p[4].c_str());
             s.avgPrice = atof(p[5].c_str());
             s.price = atof(p[6].c_str());
+            if (p.size() > 7) s.isin = p[7];
+            if (p.size() > 8) s.finectUrl = p[8];
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
         } else if (p[0] == "ATX" && p.size() >= 5) {
@@ -292,13 +295,13 @@ void Portfolio::seed() {
 
     assets = {
         {nextId++, "Telefonica", AssetType::Stock, 0, 0, 4.36,
-         {{"2026-02-10", 150, 3.80}, {"2026-04-22", 50, 4.20}}},
+         {{"2026-02-10", 150, 3.80}, {"2026-04-22", 50, 4.20}}, "ES0178430E18"},
         {nextId++, "Apple", AssetType::Stock, 0, 0, 192.30,
-         {{"2026-03-05", 14, 175.00}, {"2026-06-18", -4, 188.10}}},
+         {{"2026-03-05", 14, 175.00}, {"2026-06-18", -4, 188.10}}, "US0378331005"},
         {nextId++, "iShares MSCI World", AssetType::Fund, 0, 0, 91.40,
-         {{"2026-01-15", 15.5, 82.10}}},
+         {{"2026-01-15", 15.5, 82.10}}, "IE00B4L5Y983"},
         {nextId++, "Vanguard Global Bond", AssetType::Fund, 0, 0, 24.85,
-         {{"2026-04-15", 40, 25.30}}},
+         {{"2026-04-15", 40, 25.30}}, "IE00BG47KH54"},
     };
     for (auto& s : assets) s.recompute();
 }

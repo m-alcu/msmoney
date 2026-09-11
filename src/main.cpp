@@ -84,7 +84,7 @@ int main() {
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* s = SDL_getenv("MSMONEY_ASSET")) a.selAsset = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))
-        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 10));
+        openForm(a, (FormKind)std::clamp(atoi(fk), 0, 11));
     int frame = 0;
 
     bool running = true;

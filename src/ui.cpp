@@ -127,7 +127,7 @@ void drawUI(App& a) {
         const char* ids[] = {"", "Add movement", "New account", "Buy stock / fund",
                              "Sell stock / fund", "Update price / NAV", "Deposit terms",
                              "Delete account", "Delete asset", "Delete movement",
-                             "Delete snapshot"};
+                             "Delete snapshot", "Edit asset info"};
         ImGui::OpenPopup(ids[(int)a.pending]);
         a.pending = FormKind::None;
     }

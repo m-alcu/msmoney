@@ -14,6 +14,7 @@ set(IMGUI_DIR src/vendor/imgui)
 add_executable(msmoney
     src/main.cpp
     src/model.cpp
+    src/quote.cpp
     src/ui.cpp
     src/tabs.cpp
     src/forms.cpp

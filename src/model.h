@@ -38,6 +38,11 @@ struct Asset {
     double avgPrice = 0;   // average purchase price, derived from txs
     double price = 0;      // current market price / NAV
     std::vector<AssetTx> txs;
+    std::string isin;      // ISIN or equivalent security code
+    std::string finectUrl; // finect.com fund/stock page; preferred price source
+                            // over ISIN lookup since it reports the fund's own
+                            // trading currency instead of whatever a generic
+                            // ISIN search happens to resolve to
     void recompute();              // rebuild units/avgPrice from the history
     double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }

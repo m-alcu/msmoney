@@ -1,7 +1,38 @@
 // The four views: Global Position, Movements, Investments, Timeline.
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include "quote.h"
 #include "ui.h"
+
+// looks up the selected asset's price online and overwrites its price/NAV.
+// Finect is tried first when a URL is set: it reports the fund's own trading
+// currency, whereas the ISIN lookup goes through Yahoo Finance and can
+// resolve to a US listing priced in USD even for a EUR fund.
+static void fetchAssetPrice(App& a) {
+    if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) return;
+    Asset& as = a.pf.assets[a.selAsset];
+    std::string error, currency, source;
+    std::optional<double> price;
+    if (!as.finectUrl.empty()) {
+        source = "Finect";
+        price = fetchPriceFromFinect(as.finectUrl, &error, &currency);
+    } else if (!as.isin.empty()) {
+        source = "Yahoo";
+        price = fetchPriceByIsin(as.isin, &error);
+    } else {
+        setStatus(a, "No ISIN or Finect URL set for " + as.name + " - add one via Buy first");
+        return;
+    }
+    if (!price) {
+        setStatus(a, "Fetch failed for " + as.name + " via " + source + ": " + error);
+        return;
+    }
+    as.price = *price;
+    a.pf.save(a.path);
+    setStatus(a, "Fetched " + as.name + " via " + source + ": " + fmtMoney(*price) +
+                     (currency.empty() ? "" : " " + currency));
+}
 
 // ---- global position tab ---------------------------------------------------
 struct SRow {
@@ -324,13 +355,31 @@ void tabInvest(App& a) {
     ImGui::TextUnformatted("Stocks & Funds");
     ImGui::PopFont();
     ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 4 * 122 -
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 6 * 122 -
                          8);
     if (AccentButton("Buy", C_GREEN, C_DARK, ImVec2(112, 0))) openForm(a, FormKind::Buy);
     ImGui::SameLine();
     if (AccentButton("Sell", C_ORANGE, C_DARK, ImVec2(112, 0))) openForm(a, FormKind::Sell);
     ImGui::SameLine();
     if (ImGui::Button("Update price", ImVec2(112, 0))) openForm(a, FormKind::SetPrice);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(a.selAsset < 0);
+    if (ImGui::Button("Edit", ImVec2(112, 0))) openForm(a, FormKind::EditAsset);
+    ImGui::EndDisabled();
+    if (a.selAsset < 0 && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Select an asset row first");
+    ImGui::SameLine();
+    {
+        bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
+        bool hasSource = hasSel && (!pf.assets[a.selAsset].isin.empty() ||
+                                    !pf.assets[a.selAsset].finectUrl.empty());
+        ImGui::BeginDisabled(!hasSource);
+        if (ImGui::Button("Fetch", ImVec2(112, 0))) fetchAssetPrice(a);
+        ImGui::EndDisabled();
+        if (!hasSource && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(!hasSel ? "Select an asset row first"
+                                      : "This asset has no ISIN or Finect URL set");
+    }
     ImGui::SameLine();
     ImGui::BeginDisabled(a.selAsset < 0);
     if (AccentButton("Delete", C_RED, C_TEXT, ImVec2(112, 0)))
@@ -343,11 +392,12 @@ void tabInvest(App& a) {
     float totalsH = ImGui::GetTextLineHeightWithSpacing() + 14;
     bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
     float histH = hasSel ? 210.0f : 0.0f;
-    if (ImGui::BeginTable("assets", 9,
+    if (ImGui::BeginTable("assets", 10,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_ScrollY,
                           ImVec2(0, -(totalsH + histH)))) {
         ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("ISIN", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("Units", ImGuiTableColumnFlags_WidthFixed, 90.0f);
         ImGui::TableSetupColumn("Avg buy", ImGuiTableColumnFlags_WidthFixed, 100.0f);
@@ -375,6 +425,8 @@ void tabInvest(App& a) {
                                   ImGuiSelectableFlags_SpanAllColumns))
                 a.selAsset = sel ? -1 : i;
             ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            ImGui::TextColored(C_DIM, "%s", s.isin.c_str());
             ImGui::TableNextColumn();
             ImGui::TextColored(C_DIM, "%s", s.type == AssetType::Stock ? "Stock" : "Fund");
             ImGui::TableNextColumn();
