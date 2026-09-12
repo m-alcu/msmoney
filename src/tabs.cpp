@@ -159,23 +159,30 @@ void tabGlobal(App& a) {
         }
         section("INVESTMENTS (STOCKS & FUNDS)", C_ORANGE, inv, pf.investmentsValue());
 
-        // asset allocation bar
+        // asset allocation bar - every asset (Stock or Fund) is broken down
+        // into Equity / Long fixed income / Short fixed income by its own
+        // class split, so a plain Stock (100% equity) and a fund's equity
+        // slice land in the same bucket instead of being shown separately
         double cash = std::max(0.0, pf.totalByType(AccountType::Cash));
         double bank = std::max(0.0, pf.totalByType(AccountType::Bank));
         double depo = std::max(0.0, pf.totalByType(AccountType::Deposit) +
                                         pf.accruedInterest());
-        double stocks = 0, funds = 0;
-        for (auto& s : pf.assets)
-            (s.type == AssetType::Stock ? stocks : funds) += std::max(0.0, s.value());
-        double total = cash + bank + depo + stocks + funds;
+        double equity = 0, longFixed = 0, shortFixed = 0;
+        for (auto& s : pf.assets) {
+            equity += std::max(0.0, s.equityValue());
+            longFixed += std::max(0.0, s.longFixedValue());
+            shortFixed += std::max(0.0, s.shortFixedValue());
+        }
+        double total = cash + bank + depo + equity + longFixed + shortFixed;
 
         ImGui::TextColored(C_PURPLE, "ASSET ALLOCATION");
         ImGui::Separator();
         ImGui::Spacing();
         struct Seg { const char* name; double v; ImVec4 c; };
-        Seg segs[5] = {{"Cash", cash, C_GREEN}, {"Bank", bank, C_BLUE},
-                       {"Deposits", depo, C_YELLOW}, {"Stocks", stocks, C_ORANGE},
-                       {"Funds", funds, C_PURPLE}};
+        Seg segs[6] = {{"Cash", cash, C_GREEN},        {"Bank", bank, C_BLUE},
+                       {"Deposits", depo, C_YELLOW},   {"Equity", equity, C_ORANGE},
+                       {"Long fixed income", longFixed, C_TEAL},
+                       {"Short fixed income", shortFixed, C_PINK}};
         if (total > 0) {
             float w = ImGui::GetContentRegionAvail().x;
             ImVec2 p = ImGui::GetCursorScreenPos();

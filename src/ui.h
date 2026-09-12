@@ -23,6 +23,8 @@ inline const ImVec4 C_BLUE = rgb(82, 152, 219);
 inline const ImVec4 C_YELLOW = rgb(241, 196, 15);
 inline const ImVec4 C_ORANGE = rgb(230, 126, 34);
 inline const ImVec4 C_PURPLE = rgb(165, 105, 189);
+inline const ImVec4 C_TEAL = rgb(66, 179, 168);
+inline const ImVec4 C_PINK = rgb(214, 116, 168);
 inline const ImVec4 C_DARK = rgb(15, 18, 22);
 
 extern ImFont* fBody;
@@ -37,7 +39,8 @@ enum class FormKind {
 
 struct FormBufs {
     char date[16]{}, desc[128]{}, name[64]{}, amount[32]{}, units[32]{}, price[32]{},
-        initial[32]{}, rate[16]{}, isin[16]{}, url[160]{};
+        initial[32]{}, rate[16]{}, isin[16]{}, url[160]{}, equityPct[16]{}, longFixedPct[16]{},
+        shortFixedPct[16]{};
     int typeIdx = 0;   // account or asset type
     int assetIdx = 0;  // sell / update-price target
     std::string error;

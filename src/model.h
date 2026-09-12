@@ -45,6 +45,12 @@ struct Asset {
                             // instead of whatever a generic ISIN search
                             // happens to resolve to); unused for Stocks,
                             // which are still fetched by ISIN via Yahoo
+    // how this holding's value splits across asset classes, as percentages
+    // that should add up to ~100; a plain Stock is typically 100/0/0, while a
+    // Fund can mix equity and fixed income. Used to break "Funds" down into
+    // sub-buckets on the (live) asset allocation view - historical Snapshots
+    // keep recording just one aggregate Funds figure regardless.
+    double equityPct = 100, longFixedPct = 0, shortFixedPct = 0;
     void recompute();              // rebuild units/avgPrice from the history
     double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }
@@ -52,6 +58,9 @@ struct Asset {
     double gain() const { return value() - cost(); }  // unrealized
     double gainPct() const { return cost() > 0 ? gain() / cost() * 100.0 : 0; }
     double totalGain() const { return gain() + realizedGain(); }
+    double equityValue() const { return value() * equityPct / 100.0; }
+    double longFixedValue() const { return value() * longFixedPct / 100.0; }
+    double shortFixedValue() const { return value() * shortFixedPct / 100.0; }
 };
 
 // point-in-time record of the asset allocation, one per day at most

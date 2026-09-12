@@ -191,7 +191,8 @@ bool Portfolio::save(const std::string& path) const {
         f << "ASSET|" << s.id << '|' << clean(s.name) << '|' << (int)s.type
           << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
           << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.url)
-          << '\n';
+          << '|' << fmtNum(s.equityPct, 2) << '|' << fmtNum(s.longFixedPct, 2) << '|'
+          << fmtNum(s.shortFixedPct, 2) << '\n';
         for (const auto& t : s.txs)
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
               << fmtNum(t.price, 4) << '\n';
@@ -239,6 +240,14 @@ bool Portfolio::load(const std::string& path) {
             s.price = atof(p[6].c_str());
             if (p.size() > 7) s.isin = p[7];
             if (p.size() > 8) s.url = p[8];
+            // pre-existing saves have no asset-class split; default to 100%
+            // equity so a Fund's whole value keeps landing in one bucket
+            // (matching its old, undivided "Funds" allocation) until edited
+            if (p.size() > 11) {
+                s.equityPct = atof(p[9].c_str());
+                s.longFixedPct = atof(p[10].c_str());
+                s.shortFixedPct = atof(p[11].c_str());
+            }
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
         } else if (p[0] == "ATX" && p.size() >= 5) {
@@ -299,9 +308,9 @@ void Portfolio::seed() {
         {nextId++, "Apple", AssetType::Stock, 0, 0, 192.30,
          {{"2026-03-05", 14, 175.00}, {"2026-06-18", -4, 188.10}}, "US0378331005"},
         {nextId++, "iShares MSCI World", AssetType::Fund, 0, 0, 91.40,
-         {{"2026-01-15", 15.5, 82.10}}, "IE00B4L5Y983"},
+         {{"2026-01-15", 15.5, 82.10}}, "IE00B4L5Y983", "", 100, 0, 0},
         {nextId++, "Vanguard Global Bond", AssetType::Fund, 0, 0, 24.85,
-         {{"2026-04-15", 40, 25.30}}, "IE00BG47KH54"},
+         {{"2026-04-15", 40, 25.30}}, "IE00BG47KH54", "", 0, 100, 0},
     };
     for (auto& s : assets) s.recompute();
 }
