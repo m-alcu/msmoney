@@ -5,24 +5,24 @@
 #include "quote.h"
 #include "ui.h"
 
-// looks up the selected asset's price online and overwrites its price/NAV.
+// looks up one asset's price online and overwrites its price/NAV in place
+// (does not save or set status - callers do that, singly or batched).
 // Funds are priced via Finect (it reports the fund's own trading currency,
 // whereas the ISIN lookup through Yahoo Finance can resolve to a US listing
 // priced in USD even for a EUR fund); everything else goes through Yahoo by
-// ISIN. Both paths require an ISIN to be set.
-static void fetchAssetPrice(App& a) {
-    if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) return;
-    Asset& as = a.pf.assets[a.selAsset];
+// ISIN. Both paths require an ISIN to be set. Returns true on success and
+// fills msg with a summary of the outcome either way.
+static bool fetchOnePrice(Asset& as, std::string& msg) {
     if (as.isin.empty()) {
-        setStatus(a, "No update done for " + as.name + ": ISIN is not filled");
-        return;
+        msg = as.name + ": ISIN is not filled";
+        return false;
     }
     std::string error, currency, source;
     std::optional<double> price;
     if (as.type == AssetType::Fund) {
         if (as.url.empty()) {
-            setStatus(a, "No URL set for " + as.name + " - add a Finect URL via Buy first");
-            return;
+            msg = as.name + ": no URL set - add a Finect URL via Buy first";
+            return false;
         }
         source = "Finect";
         price = fetchPriceFromFinect(as.url, &error, &currency);
@@ -31,13 +31,44 @@ static void fetchAssetPrice(App& a) {
         price = fetchPriceByIsin(as.isin, &error, &currency);
     }
     if (!price) {
-        setStatus(a, "Fetch failed for " + as.name + " via " + source + ": " + error);
-        return;
+        msg = as.name + " via " + source + ": " + error;
+        return false;
     }
     as.price = *price;
-    a.pf.save(a.path);
-    setStatus(a, "Fetched " + as.name + " via " + source + ": " + fmtMoney(*price) +
-                     (currency.empty() ? "" : " " + currency));
+    msg = as.name + " via " + source + ": " + fmtMoney(*price) +
+          (currency.empty() ? "" : " " + currency);
+    return true;
+}
+
+// fetches just the selected asset (Fetch item)
+static void fetchAssetPrice(App& a) {
+    if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) return;
+    std::string msg;
+    bool ok = fetchOnePrice(a.pf.assets[a.selAsset], msg);
+    if (ok) a.pf.save(a.path);
+    setStatus(a, (ok ? "Fetched " : "Fetch failed for ") + msg);
+}
+
+// fetches every asset that has an ISIN set (Fetch all); assets without one
+// are silently skipped rather than counted as failures
+static void fetchAllAssetPrices(App& a) {
+    int ok = 0;
+    std::vector<std::string> failures;
+    for (auto& as : a.pf.assets) {
+        if (as.isin.empty()) continue;
+        std::string msg;
+        if (fetchOnePrice(as, msg))
+            ok++;
+        else
+            failures.push_back(msg);
+    }
+    if (ok > 0) a.pf.save(a.path);
+    std::string status = "Fetched " + std::to_string(ok) + " asset" + (ok == 1 ? "" : "s");
+    if (!failures.empty()) {
+        status += ", " + std::to_string(failures.size()) + " failed: ";
+        for (size_t i = 0; i < failures.size(); i++) status += (i ? "; " : "") + failures[i];
+    }
+    setStatus(a, status);
 }
 
 // ---- global position tab ---------------------------------------------------
@@ -377,13 +408,22 @@ void tabInvest(App& a) {
     ImGui::SameLine();
     {
         bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
-        bool hasSource = hasSel && !pf.assets[a.selAsset].isin.empty();
-        ImGui::BeginDisabled(!hasSource);
-        if (ImGui::Button("Fetch", ImVec2(112, 0))) fetchAssetPrice(a);
-        ImGui::EndDisabled();
-        if (!hasSource && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip(!hasSel ? "Select an asset row first"
-                                      : "This asset has no ISIN set");
+        if (hasSel) {
+            bool hasSource = !pf.assets[a.selAsset].isin.empty();
+            ImGui::BeginDisabled(!hasSource);
+            if (ImGui::Button("Fetch item", ImVec2(112, 0))) fetchAssetPrice(a);
+            ImGui::EndDisabled();
+            if (!hasSource && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("This asset has no ISIN set");
+        } else {
+            bool hasAny = std::any_of(pf.assets.begin(), pf.assets.end(),
+                                      [](const Asset& as) { return !as.isin.empty(); });
+            ImGui::BeginDisabled(!hasAny);
+            if (ImGui::Button("Fetch all", ImVec2(112, 0))) fetchAllAssetPrices(a);
+            ImGui::EndDisabled();
+            if (!hasAny && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("No assets have an ISIN set");
+        }
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(a.selAsset < 0);
