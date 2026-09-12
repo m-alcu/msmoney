@@ -322,7 +322,11 @@ void drawForms(App& a) {
 
     auto beginModal = [&](const char* title, float width = 440) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(width, 0));
+        // let the window grow to fit its content (size.y = 0) but never
+        // taller than the viewport, so it can't get positioned partly
+        // off-screen - past that cap it gets an internal scrollbar instead
+        float maxH = ImGui::GetMainViewport()->WorkSize.y - 40;
+        ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, maxH));
         return ImGui::BeginPopupModal(title, nullptr,
                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     };
