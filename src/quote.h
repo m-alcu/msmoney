@@ -5,11 +5,18 @@
 // Best-effort online price lookup by ISIN. Resolves the ISIN to a trading
 // symbol and reads back its latest quote using Yahoo Finance's public but
 // unofficial, unauthenticated endpoints (via the system `curl` binary, so no
-// extra library dependency). Returns nullopt and fills *error with a
-// human-readable reason on any failure: no network, no match for the ISIN,
-// endpoint shape changed, etc. This is a manual, on-demand lookup - nothing
-// calls it automatically, and there's no guarantee Yahoo keeps this stable.
-std::optional<double> fetchPriceByIsin(const std::string& isin, std::string* error);
+// extra library dependency). Yahoo's search is a fuzzy match and can rank an
+// unrelated, similarly-named ticker above the actual security (e.g. "IBE"
+// matching US-listed "IBEX" before Madrid-listed "IBE.MC"), so this scans
+// the ranked candidates and prefers the first one quoted in EUR - this app
+// has no multi-currency support. currency, if given, is set to the chosen
+// candidate's reported currency code (e.g. "EUR") on success. Returns
+// nullopt and fills *error with a human-readable reason on any failure: no
+// network, no match for the ISIN, endpoint shape changed, etc. This is a
+// manual, on-demand lookup - nothing calls it automatically, and there's no
+// guarantee Yahoo keeps this stable.
+std::optional<double> fetchPriceByIsin(const std::string& isin, std::string* error,
+                                       std::string* currency = nullptr);
 
 // Reads the price out of a finect.com fund/stock page (its embedded
 // schema.org JSON-LD block, e.g. "offers":{"price":"14.05","priceCurrency":

@@ -6,23 +6,29 @@
 #include "ui.h"
 
 // looks up the selected asset's price online and overwrites its price/NAV.
-// Finect is tried first when a URL is set: it reports the fund's own trading
-// currency, whereas the ISIN lookup goes through Yahoo Finance and can
-// resolve to a US listing priced in USD even for a EUR fund.
+// Funds are priced via Finect (it reports the fund's own trading currency,
+// whereas the ISIN lookup through Yahoo Finance can resolve to a US listing
+// priced in USD even for a EUR fund); everything else goes through Yahoo by
+// ISIN. Both paths require an ISIN to be set.
 static void fetchAssetPrice(App& a) {
     if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) return;
     Asset& as = a.pf.assets[a.selAsset];
+    if (as.isin.empty()) {
+        setStatus(a, "No update done for " + as.name + ": ISIN is not filled");
+        return;
+    }
     std::string error, currency, source;
     std::optional<double> price;
-    if (!as.finectUrl.empty()) {
+    if (as.type == AssetType::Fund) {
+        if (as.url.empty()) {
+            setStatus(a, "No URL set for " + as.name + " - add a Finect URL via Buy first");
+            return;
+        }
         source = "Finect";
-        price = fetchPriceFromFinect(as.finectUrl, &error, &currency);
-    } else if (!as.isin.empty()) {
-        source = "Yahoo";
-        price = fetchPriceByIsin(as.isin, &error);
+        price = fetchPriceFromFinect(as.url, &error, &currency);
     } else {
-        setStatus(a, "No ISIN or Finect URL set for " + as.name + " - add one via Buy first");
-        return;
+        source = "Yahoo";
+        price = fetchPriceByIsin(as.isin, &error, &currency);
     }
     if (!price) {
         setStatus(a, "Fetch failed for " + as.name + " via " + source + ": " + error);
@@ -371,14 +377,13 @@ void tabInvest(App& a) {
     ImGui::SameLine();
     {
         bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
-        bool hasSource = hasSel && (!pf.assets[a.selAsset].isin.empty() ||
-                                    !pf.assets[a.selAsset].finectUrl.empty());
+        bool hasSource = hasSel && !pf.assets[a.selAsset].isin.empty();
         ImGui::BeginDisabled(!hasSource);
         if (ImGui::Button("Fetch", ImVec2(112, 0))) fetchAssetPrice(a);
         ImGui::EndDisabled();
         if (!hasSource && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip(!hasSel ? "Select an asset row first"
-                                      : "This asset has no ISIN or Finect URL set");
+                                      : "This asset has no ISIN set");
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(a.selAsset < 0);

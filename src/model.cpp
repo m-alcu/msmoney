@@ -190,7 +190,7 @@ bool Portfolio::save(const std::string& path) const {
     for (const auto& s : assets) {
         f << "ASSET|" << s.id << '|' << clean(s.name) << '|' << (int)s.type
           << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
-          << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.finectUrl)
+          << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.url)
           << '\n';
         for (const auto& t : s.txs)
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
@@ -238,7 +238,7 @@ bool Portfolio::load(const std::string& path) {
             s.avgPrice = atof(p[5].c_str());
             s.price = atof(p[6].c_str());
             if (p.size() > 7) s.isin = p[7];
-            if (p.size() > 8) s.finectUrl = p[8];
+            if (p.size() > 8) s.url = p[8];
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
         } else if (p[0] == "ATX" && p.size() >= 5) {

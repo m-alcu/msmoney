@@ -77,7 +77,7 @@ void openForm(App& a, FormKind k) {
                 snprintf(b.name, sizeof b.name, "%s", as->name.c_str());
                 b.typeIdx = as->type == AssetType::Fund ? 1 : 0;
                 snprintf(b.isin, sizeof b.isin, "%s", as->isin.c_str());
-                snprintf(b.finectUrl, sizeof b.finectUrl, "%s", as->finectUrl.c_str());
+                snprintf(b.url, sizeof b.url, "%s", as->url.c_str());
             }
             snprintf(b.date, sizeof b.date, "%s", todayStr().c_str());
             break;
@@ -85,7 +85,7 @@ void openForm(App& a, FormKind k) {
             if (as) {
                 snprintf(b.name, sizeof b.name, "%s", as->name.c_str());
                 snprintf(b.isin, sizeof b.isin, "%s", as->isin.c_str());
-                snprintf(b.finectUrl, sizeof b.finectUrl, "%s", as->finectUrl.c_str());
+                snprintf(b.url, sizeof b.url, "%s", as->url.c_str());
             }
             break;
         case FormKind::Sell:
@@ -156,12 +156,12 @@ static bool submitBuy(App& a) {
         // then only changed through the Update price dialog
         a.pf.assets.push_back({a.pf.nextId++, b.name,
                                b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, 0, 0,
-                               *price, {}, b.isin, b.finectUrl});
+                               *price, {}, b.isin, b.url});
         as = &a.pf.assets.back();
         a.selAsset = (int)a.pf.assets.size() - 1;
     } else {
         if (b.isin[0]) as->isin = b.isin;
-        if (b.finectUrl[0]) as->finectUrl = b.finectUrl;
+        if (b.url[0]) as->url = b.url;
     }
     addTrade(*as, date, *units, *price);
     setStatus(a, "Bought " + fmtNum(*units, 2) + " " + b.name + " for " +
@@ -169,9 +169,9 @@ static bool submitBuy(App& a) {
     return true;
 }
 
-// updates an existing asset's ISIN/Finect URL only - no trade, no price
-// change, so it works for assets that already have full trade history and
-// don't need (or shouldn't get) another buy recorded just to fix metadata
+// updates an existing asset's ISIN/URL only - no trade, no price change, so
+// it works for assets that already have full trade history and don't need
+// (or shouldn't get) another buy recorded just to fix metadata
 static bool submitEditAsset(App& a) {
     FormBufs& b = a.bufs;
     if (a.selAsset < 0 || a.selAsset >= (int)a.pf.assets.size()) {
@@ -180,8 +180,8 @@ static bool submitEditAsset(App& a) {
     }
     Asset& as = a.pf.assets[a.selAsset];
     as.isin = b.isin;
-    as.finectUrl = b.finectUrl;
-    setStatus(a, "Updated ISIN/Finect URL for " + as.name);
+    as.url = b.url;
+    setStatus(a, "Updated ISIN/URL for " + as.name);
     return true;
 }
 
@@ -283,9 +283,9 @@ void drawForms(App& a) {
     FormBufs& b = a.bufs;
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
 
-    auto beginModal = [&](const char* title) {
+    auto beginModal = [&](const char* title, float width = 440) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(440, 0));
+        ImGui::SetNextWindowSize(ImVec2(width, 0));
         return ImGui::BeginPopupModal(title, nullptr,
                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     };
@@ -314,10 +314,10 @@ void drawForms(App& a) {
         }
         finish(formFooter(a) && submitNewAccount(a));
     }
-    if (beginModal("Buy stock / fund")) {
+    if (beginModal("Buy stock / fund", 640)) {
         ImGui::InputText("Asset name", b.name, sizeof b.name);
         ImGui::InputText("ISIN", b.isin, sizeof b.isin);
-        ImGui::InputText("Finect URL", b.finectUrl, sizeof b.finectUrl);
+        ImGui::InputText("URL", b.url, sizeof b.url);
         static const std::vector<std::string> types = {"Stock", "Fund"};
         ComboStrings("Type", &b.typeIdx, types);
         ImGui::InputText("Date (YYYY-MM-DD)", b.date, sizeof b.date);
@@ -328,11 +328,11 @@ void drawForms(App& a) {
                                   "market price/NAV separately.");
         finish(formFooter(a) && submitBuy(a));
     }
-    if (beginModal("Edit asset info")) {
+    if (beginModal("Edit asset info", 640)) {
         if (a.selAsset >= 0 && a.selAsset < (int)a.pf.assets.size()) {
             ImGui::TextColored(C_DIM, "%s", a.pf.assets[a.selAsset].name.c_str());
             ImGui::InputText("ISIN", b.isin, sizeof b.isin);
-            ImGui::InputText("Finect URL", b.finectUrl, sizeof b.finectUrl);
+            ImGui::InputText("URL", b.url, sizeof b.url);
             finish(formFooter(a) && submitEditAsset(a));
         } else {
             ImGui::CloseCurrentPopup();

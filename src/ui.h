@@ -37,7 +37,7 @@ enum class FormKind {
 
 struct FormBufs {
     char date[16]{}, desc[128]{}, name[64]{}, amount[32]{}, units[32]{}, price[32]{},
-        initial[32]{}, rate[16]{}, isin[16]{}, finectUrl[160]{};
+        initial[32]{}, rate[16]{}, isin[16]{}, url[160]{};
     int typeIdx = 0;   // account or asset type
     int assetIdx = 0;  // sell / update-price target
     std::string error;

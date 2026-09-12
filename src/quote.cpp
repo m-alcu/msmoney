@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -48,6 +49,22 @@ std::optional<std::string> extractField(const std::string& json, const std::stri
     return json.substr(pos, end - pos);
 }
 
+// pulls every "key":"value" occurrence out of a JSON blob, in the order they
+// appear; used to walk Yahoo's ranked list of search candidates
+std::vector<std::string> extractAllFields(const std::string& json, const std::string& key) {
+    std::vector<std::string> out;
+    std::string marker = "\"" + key + "\":\"";
+    size_t pos = 0;
+    while ((pos = json.find(marker, pos)) != std::string::npos) {
+        pos += marker.size();
+        size_t end = json.find('"', pos);
+        if (end == std::string::npos) break;
+        out.push_back(json.substr(pos, end - pos));
+        pos = end;
+    }
+    return out;
+}
+
 // true if every character is safe to embed in a single-quoted shell argument
 // and is a plausible URL character; rejects anything that could break out of
 // the quoting (', backtick, $, ;, |, &, whitespace, ...)
@@ -60,40 +77,69 @@ bool isSafeUrl(const std::string& url) {
 
 }  // namespace
 
-std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* error) {
-    std::string isin = sanitize(rawIsin, "");
+std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* error,
+                                       std::string* currency) {
+    // the ISIN field also doubles as a plain Yahoo ticker (e.g. "IBE.MC"),
+    // so keep the punctuation such symbols use instead of stripping it down
+    // to alphanumerics only, which would silently mangle the search query
+    std::string isin = sanitize(rawIsin, ".-^=");
     if (isin.empty()) {
         if (error) *error = "No ISIN set for this asset";
         return std::nullopt;
     }
 
-    // step 1: resolve the ISIN to a trading symbol
+    // step 1: resolve the ISIN to a ranked list of candidate trading symbols.
+    // A real 12-character ISIN normally resolves to a single, unambiguous
+    // symbol; a bare ticker (or a short/ambiguous code) can fuzzy-match
+    // several, so ask for a handful and let step 2 pick the best one.
     std::string searchJson = runCommand(
         "curl -s --max-time 8 -A 'Mozilla/5.0' "
         "'https://query2.finance.yahoo.com/v1/finance/search?q=" + isin +
-        "&quotesCount=1&newsCount=0'");
-    auto symbol = extractField(searchJson, "symbol");
-    if (!symbol || symbol->empty()) {
+        "&quotesCount=8&newsCount=0'");
+    auto symbols = extractAllFields(searchJson, "symbol");
+    if (symbols.empty()) {
         if (error) *error = "No symbol found online for ISIN " + isin;
         return std::nullopt;
     }
-    std::string sym = sanitize(*symbol, ".-^=");
 
-    // step 2: read the latest quote for that symbol
-    std::string quoteJson = runCommand(
-        "curl -s --max-time 8 -A 'Mozilla/5.0' "
-        "'https://query1.finance.yahoo.com/v8/finance/chart/" + sym + "'");
-    auto priceStr = extractField(quoteJson, "regularMarketPrice");
-    if (!priceStr) {
-        if (error) *error = "No price found online for symbol " + sym;
-        return std::nullopt;
+    // step 2: read each candidate's latest quote, in ranked order, and take
+    // the first one priced in EUR - this app has no multi-currency support,
+    // so a same-named USD listing (an ADR, or an unrelated US ticker) must
+    // not win just because Yahoo ranked it first. Fall back to the top
+    // candidate if none are in EUR.
+    std::optional<double> fallbackPrice;
+    std::string fallbackCurrency, fallbackSymbol;
+    for (size_t i = 0; i < symbols.size() && i < 6; i++) {
+        std::string sym = sanitize(symbols[i], ".-^=");
+        if (sym.empty()) continue;
+        std::string quoteJson = runCommand(
+            "curl -s --max-time 8 -A 'Mozilla/5.0' "
+            "'https://query1.finance.yahoo.com/v8/finance/chart/" + sym + "'");
+        auto priceStr = extractField(quoteJson, "regularMarketPrice");
+        if (!priceStr) continue;
+        double price;
+        try {
+            price = std::stod(*priceStr);
+        } catch (...) {
+            continue;
+        }
+        std::string cur = extractField(quoteJson, "currency").value_or("");
+        if (!fallbackPrice) {
+            fallbackPrice = price;
+            fallbackCurrency = cur;
+            fallbackSymbol = sym;
+        }
+        if (cur == "EUR") {
+            if (currency) *currency = cur;
+            return price;
+        }
     }
-    try {
-        return std::stod(*priceStr);
-    } catch (...) {
-        if (error) *error = "Malformed price data for symbol " + sym;
-        return std::nullopt;
+    if (fallbackPrice) {
+        if (currency) *currency = fallbackCurrency;
+        return fallbackPrice;
     }
+    if (error) *error = "No price found online for ISIN " + isin;
+    return std::nullopt;
 }
 
 std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* error,

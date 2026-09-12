@@ -39,10 +39,12 @@ struct Asset {
     double price = 0;      // current market price / NAV
     std::vector<AssetTx> txs;
     std::string isin;      // ISIN or equivalent security code
-    std::string finectUrl; // finect.com fund/stock page; preferred price source
-                            // over ISIN lookup since it reports the fund's own
-                            // trading currency instead of whatever a generic
-                            // ISIN search happens to resolve to
+    std::string url;       // price source page: a finect.com fund page for
+                            // Funds (fetched instead of the ISIN lookup, since
+                            // it reports the fund's own trading currency
+                            // instead of whatever a generic ISIN search
+                            // happens to resolve to); unused for Stocks,
+                            // which are still fetched by ISIN via Yahoo
     void recompute();              // rebuild units/avgPrice from the history
     double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }
