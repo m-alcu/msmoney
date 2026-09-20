@@ -17,11 +17,13 @@ static std::optional<double> parseNum(std::string s) {
     return v;
 }
 
-// shows the current Equity/Long FI/Short FI split total, flagging it in
-// orange when it doesn't add up to 100% (not a hard error - best effort)
+// shows the current Equity/Long FI/Short FI/Commodity/Other split total,
+// flagging it in orange when it doesn't add up to 100% (not a hard error -
+// best effort)
 static void pctSumHint(const FormBufs& b) {
     double sum = parseNum(b.equityPct).value_or(0) + parseNum(b.longFixedPct).value_or(0) +
-                parseNum(b.shortFixedPct).value_or(0);
+                parseNum(b.shortFixedPct).value_or(0) + parseNum(b.commodityPct).value_or(0) +
+                parseNum(b.otherPct).value_or(0);
     bool ok = sum > 99.5 && sum < 100.5;
     ImGui::TextColored(ok ? C_DIM : C_ORANGE, "Asset class split sums to %.1f%%", sum);
 }
@@ -92,10 +94,15 @@ void openForm(App& a, FormKind k) {
                          fmtNum(as->longFixedPct, 2).c_str());
                 snprintf(b.shortFixedPct, sizeof b.shortFixedPct, "%s",
                          fmtNum(as->shortFixedPct, 2).c_str());
+                snprintf(b.commodityPct, sizeof b.commodityPct, "%s",
+                         fmtNum(as->commodityPct, 2).c_str());
+                snprintf(b.otherPct, sizeof b.otherPct, "%s", fmtNum(as->otherPct, 2).c_str());
             } else {
                 snprintf(b.equityPct, sizeof b.equityPct, "100");
                 snprintf(b.longFixedPct, sizeof b.longFixedPct, "0");
                 snprintf(b.shortFixedPct, sizeof b.shortFixedPct, "0");
+                snprintf(b.commodityPct, sizeof b.commodityPct, "0");
+                snprintf(b.otherPct, sizeof b.otherPct, "0");
             }
             snprintf(b.date, sizeof b.date, "%s", todayStr().c_str());
             break;
@@ -109,6 +116,9 @@ void openForm(App& a, FormKind k) {
                          fmtNum(as->longFixedPct, 2).c_str());
                 snprintf(b.shortFixedPct, sizeof b.shortFixedPct, "%s",
                          fmtNum(as->shortFixedPct, 2).c_str());
+                snprintf(b.commodityPct, sizeof b.commodityPct, "%s",
+                         fmtNum(as->commodityPct, 2).c_str());
+                snprintf(b.otherPct, sizeof b.otherPct, "%s", fmtNum(as->otherPct, 2).c_str());
             }
             break;
         case FormKind::Sell:
@@ -179,7 +189,8 @@ static bool submitBuy(App& a) {
     if (!units || *units <= 0) { b.error = "Units must be > 0"; return false; }
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
     double eqPct = parsePct(b.equityPct), lfPct = parsePct(b.longFixedPct),
-           sfPct = parsePct(b.shortFixedPct);
+           sfPct = parsePct(b.shortFixedPct), cmPct = parsePct(b.commodityPct),
+           othPct = parsePct(b.otherPct);
     std::string date = b.date[0] ? b.date : todayStr();
     Asset* as = a.pf.findAsset(b.name);
     if (!as) {
@@ -187,7 +198,7 @@ static bool submitBuy(App& a) {
         // then only changed through the Update price dialog
         a.pf.assets.push_back({a.pf.nextId++, b.name,
                                b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, 0, 0,
-                               *price, {}, b.isin, b.url, eqPct, lfPct, sfPct});
+                               *price, {}, b.isin, b.url, eqPct, lfPct, sfPct, cmPct, othPct});
         as = &a.pf.assets.back();
         a.selAsset = (int)a.pf.assets.size() - 1;
     } else {
@@ -196,6 +207,8 @@ static bool submitBuy(App& a) {
         as->equityPct = eqPct;
         as->longFixedPct = lfPct;
         as->shortFixedPct = sfPct;
+        as->commodityPct = cmPct;
+        as->otherPct = othPct;
     }
     addTrade(*as, date, *units, *price);
     setStatus(a, "Bought " + fmtNum(*units, 2) + " " + b.name + " for " +
@@ -216,6 +229,8 @@ static bool submitEditAsset(App& a) {
     as.equityPct = parsePct(b.equityPct);
     as.longFixedPct = parsePct(b.longFixedPct);
     as.shortFixedPct = parsePct(b.shortFixedPct);
+    as.commodityPct = parsePct(b.commodityPct);
+    as.otherPct = parsePct(b.otherPct);
     as.isin = b.isin;
     as.url = b.url;
     setStatus(a, "Updated ISIN/URL/allocation for " + as.name);
@@ -368,6 +383,8 @@ void drawForms(App& a) {
         ImGui::InputText("Equity %", b.equityPct, sizeof b.equityPct);
         ImGui::InputText("Long fixed income %", b.longFixedPct, sizeof b.longFixedPct);
         ImGui::InputText("Short fixed income %", b.shortFixedPct, sizeof b.shortFixedPct);
+        ImGui::InputText("Commodity funds %", b.commodityPct, sizeof b.commodityPct);
+        ImGui::InputText("Other %", b.otherPct, sizeof b.otherPct);
         pctSumHint(b);
         ImGui::TextColored(C_DIM, "Only units and average cost change; update the\n"
                                   "market price/NAV separately.");
@@ -381,6 +398,8 @@ void drawForms(App& a) {
             ImGui::InputText("Equity %", b.equityPct, sizeof b.equityPct);
             ImGui::InputText("Long fixed income %", b.longFixedPct, sizeof b.longFixedPct);
             ImGui::InputText("Short fixed income %", b.shortFixedPct, sizeof b.shortFixedPct);
+            ImGui::InputText("Commodity funds %", b.commodityPct, sizeof b.commodityPct);
+            ImGui::InputText("Other %", b.otherPct, sizeof b.otherPct);
             pctSumHint(b);
             finish(formFooter(a) && submitEditAsset(a));
         } else {

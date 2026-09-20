@@ -150,14 +150,6 @@ void tabGlobal(App& a) {
         section("DEPOSITS", C_YELLOW, deps, pf.totalByType(AccountType::Deposit) + accr);
 
         ImGui::TableNextColumn();
-        std::vector<SRow> inv;
-        for (auto& s : pf.assets) {
-            if (s.units <= 0) continue;
-            double g = s.gainPct();
-            inv.push_back({s.name + (s.type == AssetType::Fund ? "  [F]" : "  [S]"), s.value(),
-                           (g >= 0 ? "+" : "") + fmtNum(g, 1) + "%", g >= 0 ? C_GREEN : C_RED});
-        }
-        section("INVESTMENTS (STOCKS & FUNDS)", C_ORANGE, inv, pf.investmentsValue());
 
         // asset allocation bar - every asset (Stock or Fund) is broken down
         // into Equity / Long fixed income / Short fixed income by its own
@@ -167,22 +159,26 @@ void tabGlobal(App& a) {
         double bank = std::max(0.0, pf.totalByType(AccountType::Bank));
         double depo = std::max(0.0, pf.totalByType(AccountType::Deposit) +
                                         pf.accruedInterest());
-        double equity = 0, longFixed = 0, shortFixed = 0;
+        double equity = 0, longFixed = 0, shortFixed = 0, commodity = 0, other = 0;
         for (auto& s : pf.assets) {
             equity += std::max(0.0, s.equityValue());
             longFixed += std::max(0.0, s.longFixedValue());
             shortFixed += std::max(0.0, s.shortFixedValue());
+            commodity += std::max(0.0, s.commodityValue());
+            other += std::max(0.0, s.otherValue());
         }
-        double total = cash + bank + depo + equity + longFixed + shortFixed;
+        double total = cash + bank + depo + equity + longFixed + shortFixed + commodity + other;
 
         ImGui::TextColored(C_PURPLE, "ASSET ALLOCATION");
         ImGui::Separator();
         ImGui::Spacing();
         struct Seg { const char* name; double v; ImVec4 c; };
-        Seg segs[6] = {{"Cash", cash, C_GREEN},        {"Bank", bank, C_BLUE},
+        Seg segs[8] = {{"Cash", cash, C_GREEN},        {"Bank", bank, C_BLUE},
                        {"Deposits", depo, C_YELLOW},   {"Equity", equity, C_ORANGE},
                        {"Long fixed income", longFixed, C_TEAL},
-                       {"Short fixed income", shortFixed, C_PINK}};
+                       {"Short fixed income", shortFixed, C_PINK},
+                       {"Commodity funds", commodity, C_BROWN},
+                       {"Other", other, C_GRAY}};
         if (total > 0) {
             float w = ImGui::GetContentRegionAvail().x;
             ImVec2 p = ImGui::GetCursorScreenPos();
@@ -214,6 +210,18 @@ void tabGlobal(App& a) {
                 ImGui::EndTable();
             }
         }
+        ImGui::Spacing();
+        ImGui::Spacing();
+
+        std::vector<SRow> inv;
+        for (auto& s : pf.assets) {
+            if (s.units <= 0) continue;
+            double g = s.gainPct();
+            inv.push_back({s.name + (s.type == AssetType::Fund ? "  [F]" : "  [S]"), s.value(),
+                           (g >= 0 ? "+" : "") + fmtNum(g, 1) + "%", g >= 0 ? C_GREEN : C_RED});
+        }
+        section("INVESTMENTS (STOCKS & FUNDS)", C_ORANGE, inv, pf.investmentsValue());
+
         ImGui::EndTable();
     }
 }

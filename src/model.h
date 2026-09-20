@@ -51,6 +51,7 @@ struct Asset {
     // sub-buckets on the (live) asset allocation view - historical Snapshots
     // keep recording just one aggregate Funds figure regardless.
     double equityPct = 100, longFixedPct = 0, shortFixedPct = 0;
+    double commodityPct = 0, otherPct = 0;
     void recompute();              // rebuild units/avgPrice from the history
     double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }
@@ -61,6 +62,8 @@ struct Asset {
     double equityValue() const { return value() * equityPct / 100.0; }
     double longFixedValue() const { return value() * longFixedPct / 100.0; }
     double shortFixedValue() const { return value() * shortFixedPct / 100.0; }
+    double commodityValue() const { return value() * commodityPct / 100.0; }
+    double otherValue() const { return value() * otherPct / 100.0; }
 };
 
 // point-in-time record of the asset allocation, one per day at most

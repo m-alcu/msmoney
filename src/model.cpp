@@ -192,7 +192,8 @@ bool Portfolio::save(const std::string& path) const {
           << '|' << fmtNum(s.units, 4) << '|' << fmtNum(s.avgPrice, 4)
           << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.url)
           << '|' << fmtNum(s.equityPct, 2) << '|' << fmtNum(s.longFixedPct, 2) << '|'
-          << fmtNum(s.shortFixedPct, 2) << '\n';
+          << fmtNum(s.shortFixedPct, 2) << '|' << fmtNum(s.commodityPct, 2) << '|'
+          << fmtNum(s.otherPct, 2) << '\n';
         for (const auto& t : s.txs)
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
               << fmtNum(t.price, 4) << '\n';
@@ -247,6 +248,11 @@ bool Portfolio::load(const std::string& path) {
                 s.equityPct = atof(p[9].c_str());
                 s.longFixedPct = atof(p[10].c_str());
                 s.shortFixedPct = atof(p[11].c_str());
+            }
+            // pre-existing saves have no commodity/other split; defaults to 0/0
+            if (p.size() > 13) {
+                s.commodityPct = atof(p[12].c_str());
+                s.otherPct = atof(p[13].c_str());
             }
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
