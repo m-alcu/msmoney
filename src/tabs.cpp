@@ -215,10 +215,13 @@ void tabGlobal(App& a) {
         for (auto& s : pf.assets) {
             if (s.units <= 0) continue;
             double g = s.gainPct();
-            inv.push_back({s.name + (s.type == AssetType::Fund ? "  [F]" : "  [S]"), s.value(),
+            const char* tag = s.type == AssetType::Fund   ? "  [F]"
+                             : s.type == AssetType::ETF ? "  [E]"
+                                                         : "  [S]";
+            inv.push_back({s.name + tag, s.value(),
                            (g >= 0 ? "+" : "") + fmtNum(g, 1) + "%", g >= 0 ? C_GREEN : C_RED});
         }
-        section("INVESTMENTS (STOCKS & FUNDS)", C_ORANGE, inv, pf.investmentsValue());
+        section("INVESTMENTS (STOCKS, FUNDS & ETFS)", C_ORANGE, inv, pf.investmentsValue());
 
         ImGui::EndTable();
     }
@@ -402,7 +405,7 @@ void tabInvest(App& a) {
     Portfolio& pf = a.pf;
     ImGui::Spacing();
     ImGui::PushFont(fBig);
-    ImGui::TextUnformatted("Stocks & Funds");
+    ImGui::TextUnformatted("Stocks, Funds & ETFs");
     ImGui::PopFont();
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 6 * 122 -
@@ -486,7 +489,7 @@ void tabInvest(App& a) {
             ImGui::TableNextColumn();
             ImGui::TextColored(C_DIM, "%s", s.isin.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextColored(C_DIM, "%s", s.type == AssetType::Stock ? "Stock" : "Fund");
+            ImGui::TextColored(C_DIM, "%s", assetTypeName(s.type));
             ImGui::TableNextColumn();
             TextRight(fmtNum(s.units, 2));
             ImGui::TableNextColumn();
@@ -623,14 +626,16 @@ void tabTimeline(App& a) {
         double (*get)(const Snapshot&);
         float th;
     };
-    const Series series[6] = {
+    const Series series[] = {
         {"Cash", C_GREEN, [](const Snapshot& s) { return s.cash; }, 1.5f},
         {"Bank", C_BLUE, [](const Snapshot& s) { return s.bank; }, 1.5f},
         {"Deposits", C_YELLOW, [](const Snapshot& s) { return s.deposits; }, 1.5f},
         {"Stocks", C_ORANGE, [](const Snapshot& s) { return s.stocks; }, 1.5f},
         {"Funds", C_PURPLE, [](const Snapshot& s) { return s.funds; }, 1.5f},
+        {"ETFs", C_TEAL, [](const Snapshot& s) { return s.etfs; }, 1.5f},
         {"Total", C_TEXT, [](const Snapshot& s) { return s.total(); }, 3.0f},
     };
+    const int nSeries = (int)(sizeof series / sizeof series[0]);
 
     int n = (int)sn.size();
     std::vector<double> xs(n);
@@ -709,7 +714,7 @@ void tabTimeline(App& a) {
             if (ImGui::BeginTable("tt", 2)) {
                 ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, 80.0f);
                 ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-                for (int k = 5; k >= 0; k--) {  // total first
+                for (int k = nSeries - 1; k >= 0; k--) {  // total first
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::TextColored(series[k].c, "%s", series[k].name);
@@ -723,7 +728,7 @@ void tabTimeline(App& a) {
     }
     // legend with the latest snapshot's values, at the bottom of the chart
     ImGui::Dummy(ImVec2(avail.x, avail.y - legendH - ImGui::GetStyle().ItemSpacing.y));
-    for (int k = 0; k < 6; k++) {
+    for (int k = 0; k < nSeries; k++) {
         if (k) ImGui::SameLine(0, 20);
         ImVec2 lp = ImGui::GetCursorScreenPos();
         dl->AddRectFilled(ImVec2(lp.x, lp.y + 3), ImVec2(lp.x + 12, lp.y + 15),
@@ -736,7 +741,7 @@ void tabTimeline(App& a) {
     ImGui::EndChild();
 
     // snapshot history, newest first
-    if (ImGui::BeginTable("snaptable", 8,
+    if (ImGui::BeginTable("snaptable", 9,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_ScrollY)) {
         ImGui::TableSetupColumn("Date", ImGuiTableColumnFlags_WidthFixed, 100.0f);
@@ -745,6 +750,7 @@ void tabTimeline(App& a) {
         ImGui::TableSetupColumn("Deposits", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Stocks", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Funds", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("ETFs", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 130.0f);
         ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 30.0f);
         ImGui::TableSetupScrollFreeze(0, 1);
@@ -767,6 +773,8 @@ void tabTimeline(App& a) {
             TextRight(fmtMoney(s.stocks));
             ImGui::TableNextColumn();
             TextRight(fmtMoney(s.funds));
+            ImGui::TableNextColumn();
+            TextRight(fmtMoney(s.etfs));
             ImGui::TableNextColumn();
             TextRight(fmtMoney(s.total()), C_GREEN);
             ImGui::TableNextColumn();

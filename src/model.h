@@ -3,7 +3,7 @@
 #include <vector>
 
 enum class AccountType { Cash, Bank, Deposit };
-enum class AssetType { Stock, Fund };
+enum class AssetType { Stock, Fund, ETF };
 
 struct Transaction {
     std::string date;   // YYYY-MM-DD
@@ -39,12 +39,13 @@ struct Asset {
     double price = 0;      // current market price / NAV
     std::vector<AssetTx> txs;
     std::string isin;      // ISIN or equivalent security code
-    std::string url;       // price source page: a finect.com fund page for
-                            // Funds (fetched instead of the ISIN lookup, since
-                            // it reports the fund's own trading currency
-                            // instead of whatever a generic ISIN search
-                            // happens to resolve to); unused for Stocks,
-                            // which are still fetched by ISIN via Yahoo
+    std::string url;       // price source page: a finect.com page, typically
+                            // for a Fund (fetched instead of the ISIN lookup,
+                            // since it reports the security's own trading
+                            // currency instead of whatever a generic ISIN
+                            // search happens to resolve to); left blank for
+                            // Stocks/ETFs, which are then fetched by ISIN via
+                            // Yahoo instead
     // how this holding's value splits across asset classes, as percentages
     // that should add up to ~100; a plain Stock is typically 100/0/0, while a
     // Fund can mix equity and fixed income. Used to break "Funds" down into
@@ -69,8 +70,8 @@ struct Asset {
 // point-in-time record of the asset allocation, one per day at most
 struct Snapshot {
     std::string date;  // YYYY-MM-DD
-    double cash = 0, bank = 0, deposits = 0, stocks = 0, funds = 0;
-    double total() const { return cash + bank + deposits + stocks + funds; }
+    double cash = 0, bank = 0, deposits = 0, stocks = 0, funds = 0, etfs = 0;
+    double total() const { return cash + bank + deposits + stocks + funds + etfs; }
 };
 
 struct Portfolio {

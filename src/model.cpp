@@ -120,8 +120,13 @@ Snapshot Portfolio::makeSnapshot() const {
     s.cash = totalByType(AccountType::Cash);
     s.bank = totalByType(AccountType::Bank);
     s.deposits = totalByType(AccountType::Deposit) + accruedInterest();
-    for (const auto& as : assets)
-        (as.type == AssetType::Stock ? s.stocks : s.funds) += as.value();
+    for (const auto& as : assets) {
+        switch (as.type) {
+            case AssetType::Stock: s.stocks += as.value(); break;
+            case AssetType::Fund: s.funds += as.value(); break;
+            case AssetType::ETF: s.etfs += as.value(); break;
+        }
+    }
     return s;
 }
 
@@ -201,7 +206,7 @@ bool Portfolio::save(const std::string& path) const {
     for (const auto& s : snapshots)
         f << "SNAP|" << s.date << '|' << fmtNum(s.cash, 2) << '|' << fmtNum(s.bank, 2)
           << '|' << fmtNum(s.deposits, 2) << '|' << fmtNum(s.stocks, 2) << '|'
-          << fmtNum(s.funds, 2) << '\n';
+          << fmtNum(s.funds, 2) << '|' << fmtNum(s.etfs, 2) << '\n';
     return true;
 }
 
@@ -269,6 +274,8 @@ bool Portfolio::load(const std::string& path) {
             s.deposits = atof(p[4].c_str());
             s.stocks = atof(p[5].c_str());
             s.funds = atof(p[6].c_str());
+            // pre-existing saves have no ETF column; default to 0
+            if (p.size() > 7) s.etfs = atof(p[7].c_str());
             snapshots.push_back(s);
         }
     }
@@ -317,6 +324,8 @@ void Portfolio::seed() {
          {{"2026-01-15", 15.5, 82.10}}, "IE00B4L5Y983", "", 100, 0, 0},
         {nextId++, "Vanguard Global Bond", AssetType::Fund, 0, 0, 24.85,
          {{"2026-04-15", 40, 25.30}}, "IE00BG47KH54", "", 0, 100, 0},
+        {nextId++, "iShares Core S&P 500", AssetType::ETF, 0, 0, 542.10,
+         {{"2026-05-05", 8, 505.60}}, "IE00B5BMR087"},
     };
     for (auto& s : assets) s.recompute();
 }

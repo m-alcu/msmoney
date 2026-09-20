@@ -86,7 +86,9 @@ void openForm(App& a, FormKind k) {
         case FormKind::Buy:
             if (as) {
                 snprintf(b.name, sizeof b.name, "%s", as->name.c_str());
-                b.typeIdx = as->type == AssetType::Fund ? 1 : 0;
+                b.typeIdx = as->type == AssetType::Fund   ? 1
+                            : as->type == AssetType::ETF ? 2
+                                                          : 0;
                 snprintf(b.isin, sizeof b.isin, "%s", as->isin.c_str());
                 snprintf(b.url, sizeof b.url, "%s", as->url.c_str());
                 snprintf(b.equityPct, sizeof b.equityPct, "%s", fmtNum(as->equityPct, 2).c_str());
@@ -196,9 +198,11 @@ static bool submitBuy(App& a) {
     if (!as) {
         // new asset: the market price/NAV starts at the purchase price and is
         // then only changed through the Update price dialog
-        a.pf.assets.push_back({a.pf.nextId++, b.name,
-                               b.typeIdx == 1 ? AssetType::Fund : AssetType::Stock, 0, 0,
-                               *price, {}, b.isin, b.url, eqPct, lfPct, sfPct, cmPct, othPct});
+        AssetType type = b.typeIdx == 1   ? AssetType::Fund
+                        : b.typeIdx == 2 ? AssetType::ETF
+                                         : AssetType::Stock;
+        a.pf.assets.push_back({a.pf.nextId++, b.name, type, 0, 0, *price, {}, b.isin, b.url,
+                               eqPct, lfPct, sfPct, cmPct, othPct});
         as = &a.pf.assets.back();
         a.selAsset = (int)a.pf.assets.size() - 1;
     } else {
@@ -374,7 +378,7 @@ void drawForms(App& a) {
         ImGui::InputText("Asset name", b.name, sizeof b.name);
         ImGui::InputText("ISIN", b.isin, sizeof b.isin);
         ImGui::InputText("URL", b.url, sizeof b.url);
-        static const std::vector<std::string> types = {"Stock", "Fund"};
+        static const std::vector<std::string> types = {"Stock", "Fund", "ETF"};
         ComboStrings("Type", &b.typeIdx, types);
         ImGui::InputText("Date (YYYY-MM-DD)", b.date, sizeof b.date);
         ImGui::InputText("Units", b.units, sizeof b.units);
@@ -430,7 +434,10 @@ void drawForms(App& a) {
         if (a.selAsset >= 0 && a.selAsset < (int)a.pf.assets.size()) {
             Asset& as = a.pf.assets[a.selAsset];
             ImGui::Text("Delete the %s \"%s\"?",
-                        as.type == AssetType::Fund ? "fund" : "stock", as.name.c_str());
+                        as.type == AssetType::Fund   ? "fund"
+                        : as.type == AssetType::ETF ? "ETF"
+                                                     : "stock",
+                        as.name.c_str());
             ImGui::TextColored(C_DIM, "%s units - market value %s",
                                fmtNum(as.units, 2).c_str(), fmtMoney(as.value()).c_str());
             ImGui::TextColored(C_RED, "This cannot be undone. No cash movement is recorded.");

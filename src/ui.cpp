@@ -27,6 +27,14 @@ const char* accTypeName(AccountType t) {
     }
 }
 
+const char* assetTypeName(AssetType t) {
+    switch (t) {
+        case AssetType::Stock: return "Stock";
+        case AssetType::Fund: return "Fund";
+        default: return "ETF";
+    }
+}
+
 void TextRight(const std::string& s, const ImVec4& col, ImFont* font) {
     if (font) ImGui::PushFont(font);
     float off = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(s.c_str()).x;

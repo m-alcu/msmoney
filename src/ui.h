@@ -67,6 +67,7 @@ struct App {
 void setStatus(App& a, const std::string& s);
 Account* selAccount(App& a);  // clamps selAcc; null when there are no accounts
 const char* accTypeName(AccountType t);
+const char* assetTypeName(AssetType t);
 void TextRight(const std::string& s, const ImVec4& col = C_TEXT, ImFont* font = nullptr);
 bool AccentButton(const char* label, const ImVec4& bg, const ImVec4& fg,
                   ImVec2 size = ImVec2(0, 0));

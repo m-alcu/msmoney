@@ -77,10 +77,11 @@ static void testPortfolioAndSnapshots() {
         {3, "Depo", AccountType::Deposit, 2000.0, 3.65, "2026-01-01"},
     };
     pf.assets = {{10, "S", AssetType::Stock, 10, 5, 7},
-                 {11, "F", AssetType::Fund, 2, 100, 110}};
+                 {11, "F", AssetType::Fund, 2, 100, 110},
+                 {12, "E", AssetType::ETF, 3, 50, 60}};
     checkNear(pf.totalByType(AccountType::Cash), 50, "cash total");
     checkNear(pf.totalByType(AccountType::Bank), 1000, "bank total");
-    checkNear(pf.investmentsValue(), 10 * 7 + 2 * 110, "investments value");
+    checkNear(pf.investmentsValue(), 10 * 7 + 2 * 110 + 3 * 60, "investments value");
     checkNear(pf.netWorth(),
               50 + 1000 + 2000 + pf.accruedInterest() + pf.investmentsValue(),
               "net worth = accounts + accrued interest + investments");
@@ -89,6 +90,7 @@ static void testPortfolioAndSnapshots() {
     check(s.date == todayStr(), "snapshot is dated today");
     checkNear(s.stocks, 70, "snapshot splits out stocks");
     checkNear(s.funds, 220, "snapshot splits out funds");
+    checkNear(s.etfs, 180, "snapshot splits out etfs");
     checkNear(s.deposits, 2000 + pf.accruedInterest(), "snapshot deposits incl. accrued");
     checkNear(s.total(), pf.netWorth(), "snapshot total equals net worth");
 
@@ -116,7 +118,7 @@ static void testSaveLoadRoundTrip() {
              {{"2026-01-02", 10, 10.0}, {"2026-02-02", -4, 11.0}}};
     as.recompute();
     pf.assets = {as};
-    pf.snapshots = {{"2026-03-01", 1.11, 2.22, 3.33, 4.44, 5.55}};
+    pf.snapshots = {{"2026-03-01", 1.11, 2.22, 3.33, 4.44, 5.55, 6.66}};
     pf.nextId = 3;
 
     std::string path = "model_tests_tmp.dat";
@@ -131,8 +133,9 @@ static void testSaveLoadRoundTrip() {
     checkNear(in.accounts[0].balance(), 1334.56, "movements survive");
     checkNear(in.assets[0].units, 6, "units are recomputed from the trade history");
     checkNear(in.assets[0].realizedGain(), 4 * (11.0 - 10.0), "trade history survives");
-    checkNear(in.snapshots[0].total(), 1.11 + 2.22 + 3.33 + 4.44 + 5.55,
+    checkNear(in.snapshots[0].total(), 1.11 + 2.22 + 3.33 + 4.44 + 5.55 + 6.66,
               "snapshots survive");
+    checkNear(in.snapshots[0].etfs, 6.66, "etfs column survives the round trip");
     check(in.nextId == 3, "nextId is rebuilt as highest id + 1");
 }
 
