@@ -6,12 +6,14 @@
 #include "ui.h"
 
 // looks up one asset's price online and overwrites its price/NAV in place
-// (does not save or set status - callers do that, singly or batched).
-// Funds are priced via Finect (it reports the fund's own trading currency,
-// whereas the ISIN lookup through Yahoo Finance can resolve to a US listing
-// priced in USD even for a EUR fund); everything else goes through Yahoo by
-// ISIN. Both paths require an ISIN to be set. Returns true on success and
-// fills msg with a summary of the outcome either way.
+// (does not save or set status - callers do that, singly or batched). The
+// source is picked from the asset's URL rather than its type: a URL
+// containing "finect" is fetched from that Finect page (it reports the
+// fund's own trading currency, whereas the ISIN lookup through Yahoo Finance
+// can resolve to a US listing priced in USD even for a EUR fund); any other
+// URL (including one containing "yahoo", or none at all) falls back to the
+// Yahoo lookup by ISIN. Both paths require an ISIN to be set. Returns true
+// on success and fills msg with a summary of the outcome either way.
 static bool fetchOnePrice(Asset& as, std::string& msg) {
     if (as.isin.empty()) {
         msg = as.name + ": ISIN is not filled";
@@ -19,11 +21,7 @@ static bool fetchOnePrice(Asset& as, std::string& msg) {
     }
     std::string error, currency, source;
     std::optional<double> price;
-    if (as.type == AssetType::Fund) {
-        if (as.url.empty()) {
-            msg = as.name + ": no URL set - add a Finect URL via Buy first";
-            return false;
-        }
+    if (as.url.find("finect") != std::string::npos) {
         source = "Finect";
         price = fetchPriceFromFinect(as.url, &error, &currency);
     } else {
