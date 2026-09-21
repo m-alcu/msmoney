@@ -78,6 +78,7 @@ void openForm(App& a, FormKind k) {
             break;
         case FormKind::EditDeposit:
             if (Account* acc = selAccount(a)) {
+                snprintf(b.name, sizeof b.name, "%s", acc->name.c_str());
                 snprintf(b.rate, sizeof b.rate, "%s", fmtNum(acc->rate, 2).c_str());
                 snprintf(b.date, sizeof b.date, "%s",
                          acc->since.empty() ? todayStr().c_str() : acc->since.c_str());
@@ -272,8 +273,13 @@ static bool submitEditDeposit(App& a) {
     FormBufs& b = a.bufs;
     Account* acc = selAccount(a);
     if (!acc) { b.error = "No account selected"; return false; }
+    std::string name = b.name;
+    while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+    while (!name.empty() && name.back() == ' ') name.pop_back();
+    if (name.empty()) { b.error = "Name cannot be empty"; return false; }
     auto r = parseNum(b.rate);
     if (!r || *r < 0) { b.error = "Rate must be a number >= 0"; return false; }
+    acc->name = name;
     acc->rate = *r;
     acc->since = b.date[0] ? b.date : todayStr();
     setStatus(a, acc->name + ": " + fmtNum(*r, 2) + "% APR since " + acc->since);
@@ -494,8 +500,8 @@ void drawForms(App& a) {
     }
     if (beginModal("Deposit terms")) {
         if (Account* acc = selAccount(a))
-            ImGui::TextColored(C_DIM, "%s - balance %s", acc->name.c_str(),
-                               fmtMoney(acc->balance()).c_str());
+            ImGui::TextColored(C_DIM, "Balance %s", fmtMoney(acc->balance()).c_str());
+        ImGui::InputText("Name", b.name, sizeof b.name);
         ImGui::InputText("Annual interest %", b.rate, sizeof b.rate);
         ImGui::InputText("Accruing since (YYYY-MM-DD)", b.date, sizeof b.date);
         ImGui::TextColored(C_DIM, "Simple interest, ACT/365, on the current balance.");
