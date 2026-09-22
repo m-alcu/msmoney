@@ -318,6 +318,7 @@ static bool submitSetPrice(App& a) {
     auto price = parseNum(b.price);
     if (!price || *price <= 0) { b.error = "Price must be > 0"; return false; }
     as.price = *price;
+    as.priceDate = todayStr();
     setStatus(a, as.name + " price updated to " + fmtMoney(*price));
     return true;
 }

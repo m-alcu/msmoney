@@ -198,7 +198,7 @@ bool Portfolio::save(const std::string& path) const {
           << '|' << fmtNum(s.price, 4) << '|' << clean(s.isin) << '|' << clean(s.url)
           << '|' << fmtNum(s.equityPct, 2) << '|' << fmtNum(s.longFixedPct, 2) << '|'
           << fmtNum(s.shortFixedPct, 2) << '|' << fmtNum(s.commodityPct, 2) << '|'
-          << fmtNum(s.otherPct, 2) << '\n';
+          << fmtNum(s.otherPct, 2) << '|' << s.priceDate << '\n';
         for (const auto& t : s.txs)
             f << "ATX|" << s.id << '|' << t.date << '|' << fmtNum(t.units, 4) << '|'
               << fmtNum(t.price, 4) << '\n';
@@ -259,6 +259,9 @@ bool Portfolio::load(const std::string& path) {
                 s.commodityPct = atof(p[12].c_str());
                 s.otherPct = atof(p[13].c_str());
             }
+            // pre-existing saves have no price date; leave blank rather than
+            // guessing, so the UI can show "-" instead of a false freshness
+            if (p.size() > 14) s.priceDate = p[14];
             assets.push_back(s);
             nextId = std::max(nextId, s.id + 1);
         } else if (p[0] == "ATX" && p.size() >= 5) {

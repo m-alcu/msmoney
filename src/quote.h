@@ -10,13 +10,16 @@
 // matching US-listed "IBEX" before Madrid-listed "IBE.MC"), so this scans
 // the ranked candidates and prefers the first one quoted in EUR - this app
 // has no multi-currency support. currency, if given, is set to the chosen
-// candidate's reported currency code (e.g. "EUR") on success. Returns
-// nullopt and fills *error with a human-readable reason on any failure: no
-// network, no match for the ISIN, endpoint shape changed, etc. This is a
-// manual, on-demand lookup - nothing calls it automatically, and there's no
-// guarantee Yahoo keeps this stable.
+// candidate's reported currency code (e.g. "EUR") on success. asOf, if
+// given, is set to the quote's own timestamp (YYYY-MM-DD, local time) when
+// Yahoo reports one, left untouched otherwise. Returns nullopt and fills
+// *error with a human-readable reason on any failure: no network, no match
+// for the ISIN, endpoint shape changed, etc. This is a manual, on-demand
+// lookup - nothing calls it automatically, and there's no guarantee Yahoo
+// keeps this stable.
 std::optional<double> fetchPriceByIsin(const std::string& isin, std::string* error,
-                                       std::string* currency = nullptr);
+                                       std::string* currency = nullptr,
+                                       std::string* asOf = nullptr);
 
 // Reads the price out of a finect.com fund/stock page (its embedded
 // schema.org JSON-LD block, e.g. "offers":{"price":"14.05","priceCurrency":
@@ -24,6 +27,10 @@ std::optional<double> fetchPriceByIsin(const std::string& isin, std::string* err
 // it reports the price in the fund's own trading currency - Yahoo's ISIN
 // search can resolve to a US listing and answer in USD even for a EUR fund.
 // Only https://www.finect.com/... URLs are accepted. currency, if given, is
-// set to the page's reported currency code (e.g. "EUR") on success.
+// set to the page's reported currency code (e.g. "EUR") on success. asOf, if
+// given, is set to the fund's own "last NAV update" date (YYYY-MM-DD) - what
+// Finect labels "Fecha de actualización del valor liquidativo" - read out of
+// the page's embedded state; left untouched if that field isn't found.
 std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* error,
-                                           std::string* currency = nullptr);
+                                           std::string* currency = nullptr,
+                                           std::string* asOf = nullptr);

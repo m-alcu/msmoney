@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <vector>
 
@@ -75,10 +76,45 @@ bool isSafeUrl(const std::string& url) {
     return true;
 }
 
+// Unix seconds (as reported by Yahoo's "regularMarketTime") to a local
+// YYYY-MM-DD date string; "" if the string doesn't parse
+std::string epochToDate(const std::string& epochStr) {
+    char* end = nullptr;
+    long epoch = strtol(epochStr.c_str(), &end, 10);
+    if (end == epochStr.c_str() || epoch <= 0) return "";
+    time_t t = (time_t)epoch;
+    tm lt{};
+    localtime_r(&t, &lt);
+    char buf[16];
+    strftime(buf, sizeof buf, "%Y-%m-%d", &lt);
+    return buf;
+}
+
+// Finect's fund/stock page embeds its full quote state as a percent-encoded
+// JSON blob (a Next.js data island), so the values inside it show up as
+// "%22key%22%3A%22value%22" rather than plain "key":"value". The fund's own
+// last-NAV-update timestamp lives there as
+// ..."lastQuote":{"datetime":"2026-09-17T00:00:00.000Z",...
+// -> %22lastQuote%22%3A%7B%22datetime%22%3A%222026-09-17T00%3A00%3A00...
+// The date part itself (YYYY-MM-DD) is never percent-encoded (only digits
+// and dashes), so it can be sliced out directly without a full URL-decode.
+// Returns "" if the page doesn't contain this field.
+std::string extractFinectQuoteDate(const std::string& html) {
+    static const std::string marker = "%22lastQuote%22%3A%7B%22datetime%22%3A%22";
+    size_t pos = html.find(marker);
+    if (pos == std::string::npos) return "";
+    pos += marker.size();
+    if (pos + 10 > html.size()) return "";
+    std::string date = html.substr(pos, 10);
+    for (char c : date)
+        if (!std::isdigit((unsigned char)c) && c != '-') return "";
+    return date;
+}
+
 }  // namespace
 
 std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* error,
-                                       std::string* currency) {
+                                       std::string* currency, std::string* asOf) {
     // the ISIN field also doubles as a plain Yahoo ticker (e.g. "IBE.MC"),
     // so keep the punctuation such symbols use instead of stripping it down
     // to alphanumerics only, which would silently mangle the search query
@@ -108,7 +144,7 @@ std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* 
     // not win just because Yahoo ranked it first. Fall back to the top
     // candidate if none are in EUR.
     std::optional<double> fallbackPrice;
-    std::string fallbackCurrency, fallbackSymbol;
+    std::string fallbackCurrency, fallbackSymbol, fallbackAsOf;
     for (size_t i = 0; i < symbols.size() && i < 6; i++) {
         std::string sym = sanitize(symbols[i], ".-^=");
         if (sym.empty()) continue;
@@ -124,18 +160,22 @@ std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* 
             continue;
         }
         std::string cur = extractField(quoteJson, "currency").value_or("");
+        std::string quoteDate = epochToDate(extractField(quoteJson, "regularMarketTime").value_or(""));
         if (!fallbackPrice) {
             fallbackPrice = price;
             fallbackCurrency = cur;
             fallbackSymbol = sym;
+            fallbackAsOf = quoteDate;
         }
         if (cur == "EUR") {
             if (currency) *currency = cur;
+            if (asOf && !quoteDate.empty()) *asOf = quoteDate;
             return price;
         }
     }
     if (fallbackPrice) {
         if (currency) *currency = fallbackCurrency;
+        if (asOf && !fallbackAsOf.empty()) *asOf = fallbackAsOf;
         return fallbackPrice;
     }
     if (error) *error = "No price found online for ISIN " + isin;
@@ -143,7 +183,7 @@ std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* 
 }
 
 std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* error,
-                                           std::string* currency) {
+                                           std::string* currency, std::string* asOf) {
     if (url.empty()) {
         if (error) *error = "No Finect URL set for this asset";
         return std::nullopt;
@@ -167,6 +207,10 @@ std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* 
     }
     if (currency) currency->clear();
     if (auto cur = extractField(html, "priceCurrency"); cur && currency) *currency = *cur;
+    if (asOf) {
+        std::string navDate = extractFinectQuoteDate(html);
+        if (!navDate.empty()) *asOf = navDate;
+    }
     try {
         return std::stod(*priceStr);
     } catch (...) {

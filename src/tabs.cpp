@@ -19,20 +19,21 @@ static bool fetchOnePrice(Asset& as, std::string& msg) {
         msg = as.name + ": ISIN is not filled";
         return false;
     }
-    std::string error, currency, source;
+    std::string error, currency, source, asOf;
     std::optional<double> price;
     if (as.url.find("finect") != std::string::npos) {
         source = "Finect";
-        price = fetchPriceFromFinect(as.url, &error, &currency);
+        price = fetchPriceFromFinect(as.url, &error, &currency, &asOf);
     } else {
         source = "Yahoo";
-        price = fetchPriceByIsin(as.isin, &error, &currency);
+        price = fetchPriceByIsin(as.isin, &error, &currency, &asOf);
     }
     if (!price) {
         msg = as.name + " via " + source + ": " + error;
         return false;
     }
     as.price = *price;
+    as.priceDate = asOf.empty() ? todayStr() : asOf;
     msg = as.name + " via " + source + ": " + fmtMoney(*price) +
           (currency.empty() ? "" : " " + currency);
     return true;
@@ -453,7 +454,7 @@ void tabInvest(App& a) {
     float totalsH = ImGui::GetTextLineHeightWithSpacing() + 14;
     bool hasSel = a.selAsset >= 0 && a.selAsset < (int)pf.assets.size();
     float histH = hasSel ? 210.0f : 0.0f;
-    if (ImGui::BeginTable("assets", 10,
+    if (ImGui::BeginTable("assets", 9,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_ScrollY,
                           ImVec2(0, -(totalsH + histH)))) {
@@ -461,10 +462,9 @@ void tabInvest(App& a) {
         ImGui::TableSetupColumn("ISIN", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("Units", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Avg buy", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("Price/NAV", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("As of", ImGuiTableColumnFlags_WidthFixed, 90.0f);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 120.0f);
-        ImGui::TableSetupColumn("Realized", ImGuiTableColumnFlags_WidthFixed, 105.0f);
         ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 105.0f);
         ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 65.0f);
         ImGui::TableSetupScrollFreeze(0, 1);
@@ -472,12 +472,16 @@ void tabInvest(App& a) {
         ImGui::TableHeadersRow();
         ImGui::PopStyleColor();
 
-        for (int i = 0; i < (int)pf.assets.size(); i++) {
+        std::vector<int> order(pf.assets.size());
+        for (int i = 0; i < (int)order.size(); i++) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](int lhs, int rhs) {
+            return pf.assets[lhs].value() > pf.assets[rhs].value();
+        });
+
+        for (int i : order) {
             Asset& s = pf.assets[i];
             bool sel = i == a.selAsset;
-            double realized = s.realizedGain();
             ImVec4 gc = s.gain() >= 0 ? C_GREEN : C_RED;
-            ImVec4 rc = realized >= 0 ? C_GREEN : C_RED;
             ImGui::PushID(i);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -493,13 +497,11 @@ void tabInvest(App& a) {
             ImGui::TableNextColumn();
             TextRight(fmtNum(s.units, 2));
             ImGui::TableNextColumn();
-            TextRight(fmtMoney(s.avgPrice), C_DIM);
-            ImGui::TableNextColumn();
             TextRight(fmtMoney(s.price));
             ImGui::TableNextColumn();
-            TextRight(fmtMoney(s.value()));
+            TextRight(s.priceDate.empty() ? "-" : s.priceDate, C_DIM);
             ImGui::TableNextColumn();
-            if (realized != 0) TextRight(fmtMoney(realized), rc);
+            TextRight(fmtMoney(s.value()));
             ImGui::TableNextColumn();
             TextRight(fmtMoney(s.gain()), gc);
             ImGui::TableNextColumn();

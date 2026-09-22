@@ -53,6 +53,7 @@ struct Asset {
     // keep recording just one aggregate Funds figure regardless.
     double equityPct = 100, longFixedPct = 0, shortFixedPct = 0;
     double commodityPct = 0, otherPct = 0;
+    std::string priceDate;  // date price/NAV was last updated (YYYY-MM-DD), if known
     void recompute();              // rebuild units/avgPrice from the history
     double realizedGain() const;   // P/L already locked in by sells
     double value() const { return units * price; }
