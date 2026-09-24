@@ -142,7 +142,11 @@ void Portfolio::takeSnapshot() {
 std::string todayStr() {
     time_t t = time(nullptr);
     tm lt{};
+#ifdef _WIN32
+    localtime_s(&lt, &t);
+#else
     localtime_r(&t, &lt);
+#endif
     char buf[16];
     strftime(buf, sizeof buf, "%Y-%m-%d", &lt);
     return buf;

@@ -19,7 +19,14 @@ std::string sanitize(const std::string& raw, const char* extra) {
     return out;
 }
 
-std::string runCommand(const std::string& cmd) {
+std::string runCommand(std::string cmd) {
+#ifdef _WIN32
+    // popen goes through cmd.exe, which doesn't honour single quotes (an
+    // unquoted '&' would split the command); arguments are sanitized and
+    // never contain '"', so double quotes are a safe drop-in
+    for (char& c : cmd)
+        if (c == '\'') c = '"';
+#endif
     std::array<char, 4096> buf{};
     std::string result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd.c_str(), "r"), pclose);
@@ -84,7 +91,11 @@ std::string epochToDate(const std::string& epochStr) {
     if (end == epochStr.c_str() || epoch <= 0) return "";
     time_t t = (time_t)epoch;
     tm lt{};
+#ifdef _WIN32
+    localtime_s(&lt, &t);
+#else
     localtime_r(&t, &lt);
+#endif
     char buf[16];
     strftime(buf, sizeof buf, "%Y-%m-%d", &lt);
     return buf;
