@@ -18,10 +18,11 @@
 #include "model.h"
 #include "ui.h"
 
-// An optional config.ini in the working directory can move the data file
-// somewhere else (e.g. into a synced folder):
-//   data = /home/user/Documents/msmoney.dat
-// Lines starting with # or ; are comments; ~/ expands to $HOME.
+// An optional config.ini in the working directory can set the folder that
+// holds msmoney.dat (e.g. a synced folder):
+//   data_root = /home/user/Documents
+// Lines starting with # or ; are comments; ~/ expands to $HOME (falling back
+// to %USERPROFILE% on Windows).
 static std::string dataPath() {
     std::ifstream f("config.ini");
     std::string line;
@@ -36,10 +37,14 @@ static std::string dataPath() {
         size_t eq = line.find('=');
         if (eq == std::string::npos) continue;
         std::string key = trim(line.substr(0, eq)), val = trim(line.substr(eq + 1));
-        if (key == "data" && !val.empty()) {
-            if (val[0] == '~' && (val.size() == 1 || val[1] == '/'))
-                if (const char* home = getenv("HOME")) val = home + val.substr(1);
-            return val;
+        if (key == "data_root" && !val.empty()) {
+            if (val[0] == '~' && (val.size() == 1 || val[1] == '/' || val[1] == '\\')) {
+                const char* home = getenv("HOME");
+                if (!home) home = getenv("USERPROFILE");
+                if (home) val = home + val.substr(1);
+            }
+            if (val.back() != '/' && val.back() != '\\') val += '/';
+            return val + "msmoney.dat";
         }
     }
     return "msmoney.dat";

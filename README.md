@@ -35,7 +35,8 @@ falling back to ImGui's built-in font.
 - Accounts (including deposits) and assets can be deleted with their red
   *Delete* button; a confirmation dialog always asks first.
 - Data is saved automatically to `msmoney.dat` (plain text) in the working
-  directory, or to the path set in `config.ini` (see *Configuration*).
+  directory, or in the folder set by `data_root` in `config.ini` (see
+  *Configuration*).
   Delete the file to start over with sample data.
 
 ## Build
@@ -54,14 +55,18 @@ ctest --test-dir build --output-on-failure
 
 ## Configuration
 
-An optional `config.ini` in the working directory moves the data file
-somewhere else (e.g. into a synced folder). Lines starting with `#` or `;`
-are comments; `~/` expands to `$HOME`:
+An optional `config.ini` in the working directory sets the folder where
+`msmoney.dat` is kept (e.g. a synced folder). `data_root` is a directory, not
+a file: the data file is always named `msmoney.dat` inside it, and the folder
+must already exist. Lines starting with `#` or `;` are comments; `~/` expands
+to `$HOME` (or `%USERPROFILE%` on Windows when `HOME` is unset):
 
 ```ini
-# where the data file lives (default: msmoney.dat in the working directory)
-data = ~/Documents/msmoney.dat
+# folder holding msmoney.dat (default: the working directory)
+data_root = ~/Documents
 ```
+
+On Windows, both `C:\tools\position` and `C:/tools/position` work.
 
 ## Controls
 
