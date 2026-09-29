@@ -1,6 +1,8 @@
 #pragma once
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Best-effort online price lookup by ISIN. Resolves the ISIN to a trading
 // symbol and reads back its latest quote using Yahoo Finance's public but
@@ -34,3 +36,16 @@ std::optional<double> fetchPriceByIsin(const std::string& isin, std::string* err
 std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* error,
                                            std::string* currency = nullptr,
                                            std::string* asOf = nullptr);
+
+// Downloads a finect.com fund/ETF/pension-plan page's full daily NAV
+// history: the same "products/collectives/<type>/<id>/timeseries" endpoint
+// the page's own chart calls, read via Finect's public API host using the
+// front-end API key baked into their own JS bundle (not a secret - it's
+// shipped to every browser). The page is fetched once to read its internal
+// product id (the schema.org "sku" field) and its category is read off the
+// URL itself (e.g. "planes-pensiones" -> "plans"); only fund/ETF/pension-plan/
+// SICAV categories expose this endpoint. Returns chronological
+// (YYYY-MM-DD, price) pairs from `start` to the latest published NAV.
+// Returns nullopt and fills *error with a human-readable reason on failure.
+std::optional<std::vector<std::pair<std::string, double>>> fetchHistoryFromFinect(
+    const std::string& url, const std::string& start, std::string* error);

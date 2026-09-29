@@ -75,6 +75,7 @@ void drawUI(App& a) {
         if (ImGui::IsKeyPressed(ImGuiKey_2)) a.forceTab = 1;
         if (ImGui::IsKeyPressed(ImGuiKey_3)) a.forceTab = 2;
         if (ImGui::IsKeyPressed(ImGuiKey_4)) a.forceTab = 3;
+        if (ImGui::IsKeyPressed(ImGuiKey_5)) a.forceTab = 4;
     }
 
     // header: title + tabs
@@ -85,11 +86,18 @@ void drawUI(App& a) {
     ImGui::TextColored(C_DIM, "personal finances");
     ImGui::SameLine();
     {
-        // global action: record today's position for the Timeline chart
-        float btnW = 120.0f;
+        // global actions: cache each Finect asset's price history to disk,
+        // then record today's position for the Timeline chart
+        float btnW = 120.0f, histW = 130.0f, gap = 8.0f;
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
-                             btnW - 8);
+                             histW - gap - btnW - gap);
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
+        if (ImGui::Button("Save Prices", ImVec2(histW, 0))) exportPriceHistories(a);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Download each Finect-priced asset's full daily NAV history into\n"
+                "<data folder>/<ISIN>.dat, for assets that don't have one yet");
+        ImGui::SameLine();
         bool existed = false;
         for (auto& s : a.pf.snapshots) existed |= s.date == todayStr();
         if (AccentButton("Snapshot", C_BLUE, C_DARK, ImVec2(btnW, 0))) {
@@ -104,15 +112,17 @@ void drawUI(App& a) {
 
     float statusH = ImGui::GetTextLineHeightWithSpacing() + 6;
     if (ImGui::BeginTabBar("tabs")) {
-        const char* names[4] = {"Global Position", "Movements", "Investments", "Timeline"};
-        for (int i = 0; i < 4; i++) {
+        const char* names[5] = {"Global Position", "Movements", "Investments", "Timeline",
+                                "Hist Prices"};
+        for (int i = 0; i < 5; i++) {
             ImGuiTabItemFlags flags = a.forceTab == i ? ImGuiTabItemFlags_SetSelected : 0;
             if (ImGui::BeginTabItem(names[i], nullptr, flags)) {
                 ImGui::BeginChild("content", ImVec2(0, -statusH));
                 if (i == 0) tabGlobal(a);
                 else if (i == 1) tabMovements(a);
                 else if (i == 2) tabInvest(a);
-                else tabTimeline(a);
+                else if (i == 3) tabTimeline(a);
+                else tabHistPrices(a);
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }
@@ -128,7 +138,7 @@ void drawUI(App& a) {
     else
         ImGui::TextUnformatted(" ");
     ImGui::SameLine();
-    TextRight("1/2/3/4: tabs  |  click row: select", C_DIM);
+    TextRight("1-5: tabs  |  click row: select", C_DIM);
 
     // open pending popup, then draw all modals
     if (a.pending != FormKind::None) {

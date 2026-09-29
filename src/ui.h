@@ -48,6 +48,12 @@ struct FormBufs {
     std::string error;
 };
 
+// one point of a cached Finect price history (Hist Prices tab)
+struct HistPoint {
+    std::string date;   // YYYY-MM-DD
+    double price = 0;
+};
+
 struct App {
     Portfolio pf;
     std::string path = "msmoney.dat";
@@ -61,6 +67,15 @@ struct App {
     FormBufs bufs;
     std::string status;
     uint64_t statusAt = 0;
+
+    // Hist Prices tab: which asset/range is selected, and the currently
+    // loaded series (re-used across frames - only reloaded when the asset
+    // selection changes, since loading may mean a blocking network fetch)
+    int histAssetIdx = 0;
+    int histRangeIdx = 0;       // index into the All/5y/3y/1y/6m/3m/1m ranges
+    int histLoadedAssetId = -1;  // Asset::id currently cached in histSeries
+    std::vector<HistPoint> histSeries;
+    std::string histError;
 };
 
 // ---- shared helpers (ui.cpp) -------------------------------------------------
@@ -81,6 +96,8 @@ void tabGlobal(App& a);
 void tabMovements(App& a);
 void tabInvest(App& a);
 void tabTimeline(App& a);
+void tabHistPrices(App& a);
+void exportPriceHistories(App& a);  // one-shot Finect NAV history export (tabs.cpp)
 
 // ---- shell (ui.cpp) ----------------------------------------------------------
 void drawUI(App& a);  // full-window UI: header, tab bar, status bar, modals

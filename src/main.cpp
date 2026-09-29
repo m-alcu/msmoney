@@ -85,7 +85,7 @@ int main() {
 
     // debug hooks for headless testing / screenshots
     const char* shotPath = SDL_getenv("MSMONEY_SHOT");
-    if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 3);
+    if (const char* t = SDL_getenv("MSMONEY_TAB")) a.forceTab = std::clamp(atoi(t), 0, 4);
     if (const char* s = SDL_getenv("MSMONEY_ACC")) a.selAcc = atoi(s);
     if (const char* s = SDL_getenv("MSMONEY_ASSET")) a.selAsset = atoi(s);
     if (const char* fk = SDL_getenv("MSMONEY_FORM"))

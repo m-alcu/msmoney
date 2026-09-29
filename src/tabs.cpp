@@ -1,6 +1,9 @@
 // The four views: Global Position, Movements, Investments, Timeline.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include "quote.h"
 #include "ui.h"
@@ -63,6 +66,65 @@ static void fetchAllAssetPrices(App& a) {
     }
     if (ok > 0) a.pf.save(a.path);
     std::string status = "Fetched " + std::to_string(ok) + " asset" + (ok == 1 ? "" : "s");
+    if (!failures.empty()) {
+        status += ", " + std::to_string(failures.size()) + " failed: ";
+        for (size_t i = 0; i < failures.size(); i++) status += (i ? "; " : "") + failures[i];
+    }
+    setStatus(a, status);
+}
+
+// the folder msmoney.dat itself lives in - a.path is either a bare filename
+// (current directory) or <data_root>/msmoney.dat, per config.ini's data_root
+static std::string dataDir(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    return pos == std::string::npos ? std::string() : path.substr(0, pos + 1);
+}
+
+// an asset's ISIN as typed is free text (up to 16 chars); keep only what's
+// safe to use as a bare filename so a stray "/" or ".." in that field can't
+// write outside the data folder
+static std::string isinFilename(const std::string& isin) {
+    std::string out;
+    for (char c : isin)
+        if (std::isalnum((unsigned char)c)) out += c;
+    return out;
+}
+
+// one-shot per asset: downloads its full daily NAV history from Finect into
+// <data folder>/<ISIN>.dat (one "date|price" line per day) so a later feature
+// can read it back without hitting the network again. Only assets priced via
+// a Finect URL are covered - Yahoo (the ISIN-only fallback) isn't queried for
+// history here. Never overwrites a file that's already there, so this is
+// safe to click repeatedly / on every launch.
+void exportPriceHistories(App& a) {
+    std::string dir = dataDir(a.path);
+    int created = 0, skipped = 0;
+    std::vector<std::string> failures;
+    for (auto& as : a.pf.assets) {
+        std::string file = isinFilename(as.isin);
+        if (file.empty() || as.url.find("finect") == std::string::npos) continue;
+        std::string filePath = dir + file + ".dat";
+        if (std::filesystem::exists(filePath)) {
+            skipped++;
+            continue;
+        }
+        std::string error;
+        auto series = fetchHistoryFromFinect(as.url, "1990-01-01", &error);
+        if (!series) {
+            failures.push_back(as.name + ": " + error);
+            continue;
+        }
+        std::ofstream f(filePath);
+        if (!f) {
+            failures.push_back(as.name + ": could not create " + filePath);
+            continue;
+        }
+        for (auto& [date, price] : *series) f << date << '|' << fmtNum(price, 4) << '\n';
+        created++;
+    }
+    std::string status = "Saved " + std::to_string(created) + " price histor" +
+                         (created == 1 ? "y" : "ies");
+    if (skipped) status += ", " + std::to_string(skipped) + " already up to date";
     if (!failures.empty()) {
         status += ", " + std::to_string(failures.size()) + " failed: ";
         for (size_t i = 0; i < failures.size(); i++) status += (i ? "; " : "") + failures[i];
@@ -793,4 +855,194 @@ void tabTimeline(App& a) {
         }
         ImGui::EndTable();
     }
+}
+
+// ---- hist prices tab ---------------------------------------------------------
+
+// reads a cached <ISIN>.dat file (date|price per line) written here or by the
+// Save Prices button
+static std::vector<HistPoint> loadHistFile(const std::string& path) {
+    std::vector<HistPoint> out;
+    std::ifstream f(path);
+    std::string line;
+    while (std::getline(f, line)) {
+        size_t bar = line.find('|');
+        if (bar == std::string::npos) continue;
+        try {
+            out.push_back({line.substr(0, bar), std::stod(line.substr(bar + 1))});
+        } catch (...) {
+        }
+    }
+    return out;
+}
+
+// makes sure a.histSeries holds `as`'s full price history, fetching it from
+// Finect (and caching it to <ISIN>.dat, same as Save Prices) the first time
+// an asset without a cache file is selected. No-op once loaded - this is a
+// blocking network call on a cache miss, so it must only run on selection
+// change, not every frame. a.histError is set instead on failure.
+static void loadHistSeries(App& a, Asset& as) {
+    if (a.histLoadedAssetId == as.id) return;
+    a.histLoadedAssetId = as.id;
+    a.histSeries.clear();
+    a.histError.clear();
+    std::string filePath = dataDir(a.path) + isinFilename(as.isin) + ".dat";
+    if (!std::filesystem::exists(filePath)) {
+        std::string error;
+        auto series = fetchHistoryFromFinect(as.url, "1990-01-01", &error);
+        if (!series) {
+            a.histError = error;
+            return;
+        }
+        std::ofstream f(filePath);
+        for (auto& [date, price] : *series) f << date << '|' << fmtNum(price, 4) << '\n';
+    }
+    a.histSeries = loadHistFile(filePath);
+    if (a.histSeries.empty()) a.histError = "No price history in " + filePath;
+}
+
+void tabHistPrices(App& a) {
+    Portfolio& pf = a.pf;
+    ImGui::Spacing();
+    ImGui::PushFont(fBig);
+    ImGui::TextUnformatted("Hist Prices");
+    ImGui::PopFont();
+    ImGui::SameLine();
+    ImGui::TextColored(C_DIM, " full daily price history for a Finect-priced fund or ETF");
+    ImGui::Spacing();
+
+    // candidates: Finect-priced, non-Stock assets with an ISIN to name the
+    // cache file after
+    std::vector<Asset*> cand;
+    for (auto& as : pf.assets)
+        if (as.type != AssetType::Stock && !as.isin.empty() &&
+            as.url.find("finect") != std::string::npos)
+            cand.push_back(&as);
+
+    if (cand.empty()) {
+        ImGui::TextColored(C_DIM,
+                           "No fund/ETF assets with a Finect price source yet. Set a Finect\n"
+                           "URL for one via Buy or Edit (Investments tab) to see its history "
+                           "here.");
+        return;
+    }
+    a.histAssetIdx = std::clamp(a.histAssetIdx, 0, (int)cand.size() - 1);
+
+    ImGui::SetNextItemWidth(320);
+    if (ImGui::BeginCombo("Asset", cand[a.histAssetIdx]->name.c_str())) {
+        for (int i = 0; i < (int)cand.size(); i++)
+            if (ImGui::Selectable(cand[i]->name.c_str(), i == a.histAssetIdx))
+                a.histAssetIdx = i;
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    struct Range {
+        const char* label;
+        int days;  // 0 = all history
+    };
+    static const Range ranges[] = {
+        {"All", 0}, {"5 years", 1826}, {"3 years", 1096}, {"1 year", 365},
+        {"6 months", 182}, {"3 months", 91}, {"1 month", 31},
+    };
+    ImGui::SetNextItemWidth(140);
+    if (ImGui::BeginCombo("Range", ranges[a.histRangeIdx].label)) {
+        for (int i = 0; i < (int)(sizeof ranges / sizeof ranges[0]); i++)
+            if (ImGui::Selectable(ranges[i].label, i == a.histRangeIdx)) a.histRangeIdx = i;
+        ImGui::EndCombo();
+    }
+
+    Asset& as = *cand[a.histAssetIdx];
+    loadHistSeries(a, as);
+    ImGui::Spacing();
+
+    if (!a.histError.empty()) {
+        ImGui::TextColored(C_RED, "%s", a.histError.c_str());
+        return;
+    }
+
+    int cutoffDays = ranges[a.histRangeIdx].days;
+    std::string today = todayStr();
+    std::vector<HistPoint> pts;
+    for (auto& p : a.histSeries)
+        if (cutoffDays == 0 || daysBetween(p.date, today) <= cutoffDays) pts.push_back(p);
+
+    if (pts.empty()) {
+        ImGui::TextColored(C_DIM, "No price points in this range.");
+        return;
+    }
+
+    int n = (int)pts.size();
+    std::vector<double> xs(n);
+    for (int i = 0; i < n; i++) xs[i] = (double)daysBetween(pts.front().date, pts[i].date);
+    double spanX = std::max(1.0, xs.back());
+
+    double minV = pts[0].price, maxV = pts[0].price;
+    for (auto& p : pts) {
+        minV = std::min(minV, p.price);
+        maxV = std::max(maxV, p.price);
+    }
+    double step = niceStep((maxV - minV) * 1.05, 6);
+    double yLo = step > 0 ? std::floor(minV / step) * step : minV;
+    double yHi = step > 0 ? std::ceil((maxV + step * 0.2) / step) * step : maxV;
+    if (yHi <= yLo) yHi = yLo + 1.0;
+
+    ImGui::BeginChild("histchart", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImVec2 pl0(p0.x + 70, p0.y + 10);
+    ImVec2 pl1(p0.x + avail.x - 18, p0.y + avail.y - 24);
+    if (pl1.x > pl0.x + 60 && pl1.y > pl0.y + 60) {
+        auto px = [&](double x) {
+            if (n == 1) return (pl0.x + pl1.x) * 0.5f;
+            return pl0.x + (float)(x / spanX) * (pl1.x - pl0.x);
+        };
+        auto py = [&](double v) {
+            return pl1.y - (float)((v - yLo) / (yHi - yLo)) * (pl1.y - pl0.y);
+        };
+        ImU32 cGrid = ImGui::ColorConvertFloat4ToU32(rgb(45, 53, 64));
+        ImU32 cDim = ImGui::ColorConvertFloat4ToU32(C_DIM);
+        ImU32 cLine = ImGui::ColorConvertFloat4ToU32(C_TEAL);
+
+        for (double v = yLo; v <= yHi + step * 0.01; v += step) {
+            float y = py(v);
+            dl->AddLine(ImVec2(pl0.x, y), ImVec2(pl1.x, y), cGrid);
+            std::string lab = fmtMoney(v);
+            float tw = ImGui::CalcTextSize(lab.c_str()).x;
+            dl->AddText(ImVec2(pl0.x - tw - 8, y - ImGui::GetTextLineHeight() * 0.5f), cDim,
+                        lab.c_str());
+        }
+        float lastLabEnd = -1e9f;
+        for (int i = 0; i < n; i++) {
+            float x = px(xs[i]);
+            float tw = ImGui::CalcTextSize(pts[i].date.c_str()).x;
+            float lx = std::clamp(x - tw * 0.5f, pl0.x - 40.0f, pl1.x - tw + 12.0f);
+            if (lx < lastLabEnd + 60) continue;
+            dl->AddLine(ImVec2(x, pl0.y), ImVec2(x, pl1.y), cGrid);
+            dl->AddText(ImVec2(lx, pl1.y + 6), cDim, pts[i].date.c_str());
+            lastLabEnd = lx + tw;
+        }
+        dl->AddRect(pl0, pl1, ImGui::ColorConvertFloat4ToU32(C_BORDER));
+
+        if (n > 1) {
+            std::vector<ImVec2> line(n);
+            for (int i = 0; i < n; i++) line[i] = ImVec2(px(xs[i]), py(pts[i].price));
+            dl->AddPolyline(line.data(), n, cLine, 0, 2.0f);
+        }
+
+        if (ImGui::IsMouseHoveringRect(pl0, pl1)) {
+            float mx = ImGui::GetIO().MousePos.x;
+            int best = 0;
+            for (int i = 1; i < n; i++)
+                if (std::fabs(px(xs[i]) - mx) < std::fabs(px(xs[best]) - mx)) best = i;
+            float x = px(xs[best]), y = py(pts[best].price);
+            dl->AddLine(ImVec2(x, pl0.y), ImVec2(x, pl1.y), cDim);
+            dl->AddCircleFilled(ImVec2(x, y), 4.0f, cLine);
+            ImGui::BeginTooltip();
+            ImGui::TextColored(C_DIM, "%s", pts[best].date.c_str());
+            ImGui::TextColored(C_TEXT, "%s", fmtMoney(pts[best].price).c_str());
+            ImGui::EndTooltip();
+        }
+    }
+    ImGui::EndChild();
 }

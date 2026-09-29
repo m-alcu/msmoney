@@ -1,4 +1,5 @@
 #include "quote.h"
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdio>
@@ -122,6 +123,63 @@ std::string extractFinectQuoteDate(const std::string& html) {
     return date;
 }
 
+// pulls every {"datetime":"...","price":...} entry out of a Finect timeseries
+// response body, in the order they appear. Entries with a non-numeric price
+// (e.g. a not-yet-published "null" for today) are skipped rather than
+// aborting the whole parse.
+std::vector<std::pair<std::string, double>> parseFinectTimeseries(const std::string& json) {
+    std::vector<std::pair<std::string, double>> out;
+    static const std::string dMarker = "\"datetime\":\"";
+    static const std::string pMarker = "\"price\":";
+    size_t pos = 0;
+    while ((pos = json.find(dMarker, pos)) != std::string::npos) {
+        pos += dMarker.size();
+        if (pos + 10 > json.size()) break;
+        std::string date = json.substr(pos, 10);
+        size_t pricePos = json.find(pMarker, pos);
+        if (pricePos == std::string::npos) break;
+        pricePos += pMarker.size();
+        size_t end = pricePos;
+        while (end < json.size() &&
+              (std::isdigit((unsigned char)json[end]) || json[end] == '.' || json[end] == '-'))
+            end++;
+        if (end > pricePos) {
+            try {
+                out.push_back({date, std::stod(json.substr(pricePos, end - pricePos))});
+            } catch (...) {
+            }
+        }
+        pos = end;
+    }
+    return out;
+}
+
+// Finect's product-type slug (as it appears right after finect.com/ in the
+// page URL) to the plural form its API groups it under
+// (products/collectives/<api>/<id>/...). Only "iic" categories expose a
+// timeseries endpoint - stocks, for instance, don't.
+std::optional<std::string> finectApiCategory(const std::string& url) {
+    static const std::pair<const char*, const char*> slugs[] = {
+        {"fondos-inversion", "funds"}, {"fondos", "funds"},
+        {"planes-pensiones", "plans"}, {"planes", "plans"},
+        {"etfs", "etfs"},
+        {"sicavs", "sicavs"},
+    };
+    std::string rest = url.substr(strlen("https://www.finect.com/"));
+    size_t slash = rest.find('/');
+    std::string slug = slash == std::string::npos ? rest : rest.substr(0, slash);
+    for (auto& s : slugs)
+        if (slug == s.first) return std::string(s.second);
+    return std::nullopt;
+}
+
+bool isAlnum(const std::string& s) {
+    if (s.empty()) return false;
+    for (char c : s)
+        if (!std::isalnum((unsigned char)c)) return false;
+    return true;
+}
+
 }  // namespace
 
 std::optional<double> fetchPriceByIsin(const std::string& rawIsin, std::string* error,
@@ -228,4 +286,58 @@ std::optional<double> fetchPriceFromFinect(const std::string& url, std::string* 
         if (error) *error = "Malformed price data on the Finect page";
         return std::nullopt;
     }
+}
+
+std::optional<std::vector<std::pair<std::string, double>>> fetchHistoryFromFinect(
+    const std::string& url, const std::string& start, std::string* error) {
+    if (url.empty()) {
+        if (error) *error = "No Finect URL set for this asset";
+        return std::nullopt;
+    }
+    if (url.rfind("https://www.finect.com/", 0) != 0) {
+        if (error) *error = "Finect URL must start with https://www.finect.com/";
+        return std::nullopt;
+    }
+    if (!isSafeUrl(url)) {
+        if (error) *error = "Invalid character in Finect URL";
+        return std::nullopt;
+    }
+    auto category = finectApiCategory(url);
+    if (!category) {
+        if (error) *error = "This Finect product type has no price history endpoint";
+        return std::nullopt;
+    }
+
+    // the product page's schema.org JSON-LD block carries Finect's own
+    // internal product id (distinct from the ISIN/DGS code in the URL),
+    // e.g. "sku":"ac33e9f6","identifier":"ac33e9f6","productID":"isin:N4729"
+    std::string html = runCommand("curl -sL --max-time 10 -A 'Mozilla/5.0' '" + url + "'");
+    auto sku = extractField(html, "sku");
+    if (!sku || !isAlnum(*sku)) {
+        if (error) *error = "Could not read the product id off the Finect page";
+        return std::nullopt;
+    }
+
+    // same endpoint the page's own NAV chart calls, via Finect's public API
+    // host; "key" is the front-end API key baked into Finect's own JS bundle
+    // (not a secret - it's shipped to every browser, just required so the
+    // API accepts the request)
+    std::string apiUrl = "https://api.finect.com/v4/products/collectives/" + *category + "/" +
+                         *sku + "/timeseries?start=" + start;
+    std::string json = runCommand(
+        "curl -s --max-time 15 -A 'Mozilla/5.0' -H 'Accept: application/json' "
+        "-H 'key: OgcqanUxQ4S6Y5VVvnwlJayUuxeg8Ah5' '" + apiUrl + "'");
+
+    if (auto codeStr = extractField(json, "code"); codeStr && *codeStr != "200") {
+        if (error)
+            *error = extractField(json, "message").value_or("Finect API error " + *codeStr);
+        return std::nullopt;
+    }
+    auto series = parseFinectTimeseries(json);
+    if (series.empty()) {
+        if (error) *error = "No price history found on Finect";
+        return std::nullopt;
+    }
+    std::sort(series.begin(), series.end());
+    return series;
 }
